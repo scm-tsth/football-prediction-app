@@ -74,6 +74,23 @@
   let matches = [];
   let predictions = {}; // matchId -> array of predictions
   let myName = localStorage.getItem('predictorName') || '';
+  let editingMatchId = null;
+
+  function teamOptionsHtml(selected) {
+    return TEAMS.map(t => `<option value="${t.code}" ${t.code === selected ? 'selected' : ''}>${t.name}</option>`).join('');
+  }
+  function hourOptionsHtml(selected) {
+    const opts = [];
+    for (let h = 0; h < 24; h++) {
+      for (let m = 0; m < 60; m += 30) {
+        const hh = String(h).padStart(2, '0');
+        const mm = String(m).padStart(2, '0');
+        const val = `${hh}:${mm}`;
+        opts.push(`<option value="${val}" ${val === selected ? 'selected' : ''}>${val} น.</option>`);
+      }
+    }
+    return opts.join('');
+  }
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
@@ -470,6 +487,48 @@
       const nameA = teamName(m.teamA);
       const nameB = teamName(m.teamB);
 
+      if (editingMatchId === m.id) {
+        const [editDate, editHourRaw] = (m.matchTime || '').split(' ');
+        const editHour = (editHourRaw || '').replace(' น.', '').replace('น.', '');
+        card.innerHTML = `
+          <div class="form-grid">
+            <div>
+              <label class="field-label">ทีม A</label>
+              <select id="editTeamA-${m.id}">${teamOptionsHtml(m.teamA)}</select>
+            </div>
+            <div>
+              <label class="field-label">ทีม B</label>
+              <select id="editTeamB-${m.id}">${teamOptionsHtml(m.teamB)}</select>
+            </div>
+            <div>
+              <label class="field-label">ฝั่งต่อ (HDP)</label>
+              <select id="editHdpSide-${m.id}">
+                <option value="A" ${m.hdpSide === 'A' ? 'selected' : ''}>ทีม A ต่อ</option>
+                <option value="B" ${m.hdpSide === 'B' ? 'selected' : ''}>ทีม B ต่อ</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label">ค่า HDP</label>
+              <input type="text" id="editHdpValue-${m.id}" value="${m.hdp}">
+            </div>
+            <div>
+              <label class="field-label">วันแข่ง</label>
+              <input type="date" id="editDate-${m.id}" value="${editDate || ''}">
+            </div>
+            <div>
+              <label class="field-label">เวลาแข่ง</label>
+              <select id="editHour-${m.id}">${hourOptionsHtml(editHour || '20:00')}</select>
+            </div>
+            <div class="full admin-row">
+              <button class="btn-tiny btn-confirm" onclick="window.__saveEditMatch('${m.id}')">💾 บันทึก</button>
+              <button class="btn-tiny" onclick="window.__cancelEditMatch()">ยกเลิก</button>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+        return;
+      }
+
       card.innerHTML = `
         <div class="admin-card-head">
           <span class="team-mini">${flagImg(m.teamA)} ${nameA}</span>
@@ -480,16 +539,50 @@
         ${m.matchTime ? `<div class="match-time">⏰ ${m.matchTime}</div>` : ''}
         <div class="admin-row">
           <button class="btn-tiny" onclick="window.__toggleLock('${m.id}', '${m.status}')" ${m.status === 'finished' ? 'disabled' : ''}>${m.status === 'open' ? '🔒 ล็อกแมตช์' : '🔓 เปิดล็อก'}</button>
+          <button class="btn-tiny" onclick="window.__startEditMatch('${m.id}')">✏️ แก้ไข</button>
+          <button class="btn-tiny btn-danger" onclick="window.__deleteMatch('${m.id}')">🗑️ ลบ</button>
+        </div>
+        <div class="admin-row">
           <input type="number" min="0" class="score-input-small" id="resA-${m.id}" placeholder="${nameA}" value="${m.resultA ?? ''}">
           <span class="dash">-</span>
           <input type="number" min="0" class="score-input-small" id="resB-${m.id}" placeholder="${nameB}" value="${m.resultB ?? ''}">
           <button class="btn-tiny btn-confirm" onclick="window.__submitResult('${m.id}')">บันทึกผลจริง</button>
-          <button class="btn-tiny btn-danger" onclick="window.__deleteMatch('${m.id}')">🗑️ ลบ</button>
         </div>
       `;
       container.appendChild(card);
     });
   }
+
+  window.__startEditMatch = (matchId) => {
+    if (!isAdmin()) { alert('เฉพาะแอดมินเท่านั้น'); return; }
+    editingMatchId = matchId;
+    renderAdminList();
+  };
+
+  window.__cancelEditMatch = () => {
+    editingMatchId = null;
+    renderAdminList();
+  };
+
+  window.__saveEditMatch = async (matchId) => {
+    if (!isAdmin()) { alert('เฉพาะแอดมินเท่านั้น'); return; }
+    const teamA = $(`#editTeamA-${matchId}`).value;
+    const teamB = $(`#editTeamB-${matchId}`).value;
+    const hdpSide = $(`#editHdpSide-${matchId}`).value;
+    const hdp = $(`#editHdpValue-${matchId}`).value.trim();
+    const matchDate = $(`#editDate-${matchId}`).value;
+    const matchHour = $(`#editHour-${matchId}`).value;
+    const matchTime = matchDate ? `${matchDate} ${matchHour} น.` : '';
+
+    if (!teamA || !teamB) { alert('กรุณาเลือกทีมทั้งสองฝั่ง'); return; }
+    if (teamA === teamB) { alert('กรุณาเลือกทีมที่ไม่ซ้ำกัน'); return; }
+
+    await updateDoc(doc(db, 'matches', matchId), {
+      teamA, teamB, hdp: hdp || '0', hdpSide, matchTime: matchTime || ''
+    });
+    editingMatchId = null;
+    renderAdminList();
+  };
 
   window.__step = (inputId, delta) => {
     const el = document.getElementById(inputId);
