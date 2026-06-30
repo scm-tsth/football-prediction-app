@@ -132,6 +132,7 @@
       $$('.tab-panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       $('#tab-' + btn.dataset.tab).classList.add('active');
+      $('#stickyConfirmBar').style.display = btn.dataset.tab === 'predict' ? 'flex' : 'none';
     });
   });
 
@@ -249,11 +250,11 @@
     renderMatches();
   };
 
-  // ---------- ยืนยันรหัส 4 หลักก่อนส่งทายผล ----------
-  let pendingMatchId = null;
+  // ---------- ยืนยันรหัส 4 หลักก่อนส่งทายผล (ส่งทีเดียวทุกแมตช์ที่เปิดอยู่) ----------
+  let pendingMatchIds = [];
 
-  function openPinModal(matchId) {
-    pendingMatchId = matchId;
+  function openPinModal(matchIds) {
+    pendingMatchIds = matchIds;
     $('#pinModalNameLabel').textContent = myName;
     $('#pinModalInput').value = '';
     $('#pinModalError').textContent = '';
@@ -262,7 +263,7 @@
   }
 
   window.__closePinModal = () => {
-    pendingMatchId = null;
+    pendingMatchIds = [];
     $('#pinModal').classList.remove('show');
   };
 
@@ -279,8 +280,50 @@
     }
 
     $('#pinModal').classList.remove('show');
-    await actuallySubmitPred(pendingMatchId);
-    pendingMatchId = null;
+    for (const matchId of pendingMatchIds) {
+      await actuallySubmitPred(matchId);
+    }
+    pendingMatchIds = [];
+    $('#confirmAllModal').classList.remove('show');
+  };
+
+  // ---------- รวบรวมการทายทั้งหมด -> หน้าต่างสรุป -> ยืนยันด้วยรหัส 4 หลัก ----------
+  function collectPendingPredictions() {
+    return matches
+      .filter(m => m.status === 'open')
+      .map(m => {
+        const scoreA = parseInt(document.getElementById(`predA-${m.id}`)?.value, 10) || 0;
+        const scoreB = parseInt(document.getElementById(`predB-${m.id}`)?.value, 10) || 0;
+        return { match: m, scoreA, scoreB };
+      });
+  }
+
+  window.__openConfirmAll = () => {
+    if (!myName) { openNameModal(true); return; }
+    const items = collectPendingPredictions();
+    if (items.length === 0) {
+      alert('ยังไม่มีแมตช์ที่เปิดให้ทายตอนนี้');
+      return;
+    }
+    const list = $('#confirmAllList');
+    list.innerHTML = items.map(({ match: m, scoreA, scoreB }) => `
+      <div class="confirm-row">
+        <span class="confirm-team">${flagImg(m.teamA)} ${teamName(m.teamA)}</span>
+        <span class="confirm-score">${scoreA} - ${scoreB}</span>
+        <span class="confirm-team">${teamName(m.teamB)} ${flagImg(m.teamB)}</span>
+      </div>
+    `).join('');
+    $('#confirmAllModal').classList.add('show');
+  };
+
+  window.__closeConfirmAll = () => {
+    $('#confirmAllModal').classList.remove('show');
+  };
+
+  window.__proceedConfirmAll = () => {
+    const items = collectPendingPredictions();
+    if (items.length === 0) return;
+    openPinModal(items.map(i => i.match.id));
   };
 
   // ---------- ส่วนแอดมิน: สร้างแมตช์ ----------
@@ -369,9 +412,12 @@
 
     const sActual = settlement(actualDiff, hdpNum);
     const sPredicted = settlement(predDiff, hdpNum);
-    // ยิ่งทาย "ระดับการกิน/เสียค่าต่อ" ใกล้เคียงผลจริงเท่าไหร่ ยิ่งได้แต้มเยอะ (เต็ม 1, ใกล้ 0.5, ผิดทาง 0)
-    let pts = Math.max(0, 1 - Math.abs(sActual - sPredicted));
-    if (pred.scoreA === match.resultA && pred.scoreB === match.resultB) pts += 2;
+    // ส่วนที่ 1 — ทาย HDP: +1 / +0.5 / 0 / -0.5 / -1 ตามความใกล้เคียงระดับชนะ-แพ้ค่าต่อ
+    const hdpComponent = 1 - Math.abs(sActual - sPredicted);
+    // ส่วนที่ 2 — ทายสกอร์: ตรงเป๊ะ +3, ไม่ตรง -1
+    const isExact = pred.scoreA === match.resultA && pred.scoreB === match.resultB;
+    const scoreComponent = isExact ? 3 : -1;
+    const pts = hdpComponent + scoreComponent;
     return Math.round(pts * 10) / 10;
   }
 
@@ -445,10 +491,7 @@
             </div>
           </div>
           <div class="hdp-preview" id="hdpPreview-${m.id}"></div>
-          <div class="name-row">
-            <span class="my-name-pill">👤 ${myName || 'ยังไม่ตั้งชื่อ'}</span>
-            <button class="btn-primary" onclick="window.__submitPred('${m.id}')" ${!isOpen ? 'disabled' : ''}>${myPred ? '✔️ แก้ไขทาย' : '🎯 ส่งทาย'}</button>
-          </div>
+          ${myPred ? '<div class="already-pred-tag">✔️ ทายไว้แล้ว — แก้ตัวเลขแล้วกดยืนยันด้านล่างเพื่ออัปเดต</div>' : ''}
         </div>
 
         ${(predictions[m.id] || []).length > 0 ? `
@@ -461,7 +504,8 @@
                   const pts = calcPoints(p, m);
                   const isMe = p.uid === currentUser.uid;
                   const displayName = isMe ? `${p.name} (คุณ)` : (isOpen ? `ผู้เล่นนิรนาม #${idx + 1}` : p.name);
-                  return `<tr class="${isMe ? 'me-row' : ''}"><td>${displayName}</td><td>${p.scoreA} - ${p.scoreB}</td><td>${pts === null ? '-' : '🎯 ' + pts}</td></tr>`;
+                  const ptsCell = pts === null ? '-' : `<span class="${pts < 0 ? 'pts-negative' : ''}">${pts < 0 ? '⚠️ ' : '🎯 '}${pts}</span>`;
+                  return `<tr class="${isMe ? 'me-row' : ''}"><td>${displayName}</td><td>${p.scoreA} - ${p.scoreB}</td><td>${ptsCell}</td></tr>`;
                 }).join('')}
               </tbody>
             </table>
@@ -623,17 +667,6 @@
     updateHdpPreview(matchId);
   };
 
-  window.__submitPred = (matchId) => {
-    if (!myName) { openNameModal(true); return; }
-    const scoreA = parseInt($(`#predA-${matchId}`).value, 10);
-    const scoreB = parseInt($(`#predB-${matchId}`).value, 10);
-    if (isNaN(scoreA) || isNaN(scoreB)) {
-      alert('กรุณาทายสกอร์ก่อนส่ง');
-      return;
-    }
-    openPinModal(matchId);
-  };
-
   async function actuallySubmitPred(matchId) {
     const scoreA = parseInt($(`#predA-${matchId}`).value, 10);
     const scoreB = parseInt($(`#predB-${matchId}`).value, 10);
@@ -669,64 +702,116 @@
 
   function renderLeaderboard() {
     const totals = {};
+    const exactCounts = {};
     matches.forEach((m) => {
       (predictions[m.id] || []).forEach((p) => {
         const pts = calcPoints(p, m);
         if (pts === null) return;
         totals[p.name] = Math.round(((totals[p.name] || 0) + pts) * 10) / 10;
+        if (p.scoreA === m.resultA && p.scoreB === m.resultB) {
+          exactCounts[p.name] = (exactCounts[p.name] || 0) + 1;
+        }
       });
     });
-    const rows = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+    const rows = Object.entries(totals).sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return (exactCounts[b[0]] || 0) - (exactCounts[a[0]] || 0);
+    });
     const medals = ['🥇', '🥈', '🥉'];
     const tbody = $('#leaderboardBody');
     tbody.innerHTML = rows.map(([name, pts], i) =>
-      `<tr class="${i < 3 ? 'rank-' + (i + 1) : ''}"><td>${medals[i] || (i + 1)}</td><td>${name}</td><td>${pts}</td></tr>`
+      `<tr class="${i < 3 ? 'rank-' + (i + 1) : ''}"><td>${medals[i] || (i + 1)}</td><td>${name}</td><td><span class="${pts < 0 ? 'pts-negative' : ''}">${pts}</span><span class="exact-badge" title="ทายตรงเป๊ะ ${exactCounts[name] || 0} ครั้ง">${exactCounts[name] ? ' 🎯×' + exactCounts[name] : ''}</span></td></tr>`
     ).join('') || '<tr><td colspan="3" class="empty-row">ยังไม่มีผลคะแนน</td></tr>';
+
+    renderPodium(rows);
+  }
+
+  function renderPodium(rows) {
+    const wrap = $('#podiumWrap');
+    if (!wrap) return;
+    if (rows.length === 0) { wrap.innerHTML = ''; return; }
+
+    const top3 = rows.slice(0, 3);
+    const [first, second, third] = top3;
+    const block = (entry, place) => {
+      if (!entry) return `<div class="podium-col podium-${place}"><div class="podium-empty">-</div><div class="podium-stand"></div></div>`;
+      const [name, pts] = entry;
+      const medal = place === 1 ? '🥇' : place === 2 ? '🥈' : '🥉';
+      return `
+        <div class="podium-col podium-${place}">
+          <div class="podium-medal">${medal}</div>
+          <div class="podium-name">${name}</div>
+          <div class="podium-pts">${pts} แต้ม</div>
+          <div class="podium-stand">${place}</div>
+        </div>`;
+    };
+    wrap.innerHTML = `
+      <div class="podium">
+        ${block(second, 2)}
+        ${block(first, 1)}
+        ${block(third, 3)}
+      </div>`;
   }
 </script>
 <style>
   :root {
-    --pitch: #0b6e4f;
-    --pitch-dark: #074a35;
-    --gold: #ffc845;
-    --gold-dark: #e0a800;
-    --blue: #1f6feb;
-    --red: #e0383a;
-    --bg: #06241c;
-    --card-bg: #0f3327;
-    --card-bg-2: #123a2d;
-    --border: #1c5240;
-    --text: #f3f7f4;
-    --muted: #9bbcae;
-    --green-ok: #3ddc84;
+    --pitch: #0c2f22;
+    --pitch-dark: #03100a;
+    --gold: #ffd54a;
+    --gold-dark: #c98f12;
+    --blue: #22d3ee;
+    --blue-glow: #38bdf8;
+    --red: #ff5066;
+    --bg: #050b12;
+    --card-bg: rgba(255,255,255,0.055);
+    --card-bg-2: rgba(255,255,255,0.075);
+    --border: rgba(255,255,255,0.14);
+    --text: #eef5f4;
+    --muted: #93a8a8;
+    --green-ok: #34e89e;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: -apple-system, "Segoe UI", "Sarabun", sans-serif;
     background:
-      radial-gradient(circle at 10% 0%, #114b35 0%, transparent 40%),
-      radial-gradient(circle at 90% 10%, #0c3a2a 0%, transparent 45%),
-      var(--bg);
+      radial-gradient(ellipse 700px 500px at 12% -5%, rgba(34,211,238,.18) 0%, transparent 60%),
+      radial-gradient(ellipse 700px 500px at 88% 0%, rgba(255,213,74,.14) 0%, transparent 60%),
+      radial-gradient(ellipse 900px 600px at 50% 110%, rgba(12,95,66,.35) 0%, transparent 65%),
+      repeating-linear-gradient(115deg, rgba(255,255,255,0.018) 0px, rgba(255,255,255,0.018) 1px, transparent 1px, transparent 64px),
+      linear-gradient(180deg, #081a14 0%, var(--bg) 45%, #02060a 100%);
+    background-attachment: fixed;
     color: var(--text);
     padding-bottom: 30px;
+    min-height: 100vh;
   }
 
   .hero {
-    background: linear-gradient(135deg, var(--pitch) 0%, var(--pitch-dark) 100%);
-    padding: 22px 16px 18px;
+    position: relative;
+    background: linear-gradient(135deg, rgba(12,47,34,.9) 0%, rgba(3,16,10,.95) 100%);
+    padding: 26px 16px 20px;
     text-align: center;
-    border-bottom: 4px solid var(--gold);
-    box-shadow: 0 4px 16px rgba(0,0,0,.3);
+    border-bottom: 1px solid rgba(255,213,74,.4);
+    box-shadow: 0 4px 30px rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.04) inset;
+    overflow: hidden;
   }
+  .hero::before {
+    content: '';
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 20% -20%, rgba(34,211,238,.35), transparent 55%),
+      radial-gradient(circle at 80% -10%, rgba(255,213,74,.3), transparent 55%);
+    pointer-events: none;
+  }
+  .hero > * { position: relative; z-index: 1; }
   .hero h1 {
     margin: 0;
     font-size: 24px;
     color: var(--gold);
     letter-spacing: .5px;
-    text-shadow: 0 2px 4px rgba(0,0,0,.4);
+    text-shadow: 0 0 18px rgba(255,213,74,.55), 0 0 40px rgba(34,211,238,.25);
   }
-  .hero .sub { color: #d9ede3; font-size: 13px; margin-top: 4px; }
+  .hero .sub { color: #cfe3da; font-size: 13px; margin-top: 4px; }
   #status { font-size: 12px; margin-top: 8px; color: var(--green-ok); }
   #status.status-error { color: var(--red); }
   .my-name-tag {
@@ -741,31 +826,86 @@
   }
 
   /* ----- ธงชาติวิ่งเลื่อน ----- */
+  .flag-ticker-outer { max-width: 720px; margin: 14px auto 0; padding: 0 12px; }
   .flag-ticker {
     overflow: hidden;
-    background: var(--pitch-dark);
-    border-bottom: 2px solid var(--gold);
-    padding: 8px 0;
+    background: rgba(255,255,255,.05);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,213,74,.4);
+    border-radius: 12px;
+    padding: 10px 0;
+    box-shadow: 0 2px 16px rgba(0,0,0,.3), inset 0 0 0 1px rgba(255,213,74,.06);
+    position: relative;
   }
+  .flag-ticker::before, .flag-ticker::after {
+    content: '';
+    position: absolute; top: 0; bottom: 0;
+    width: 28px; z-index: 2; pointer-events: none;
+  }
+  .flag-ticker::before { left: 0; background: linear-gradient(90deg, rgba(5,11,18,.9), transparent); }
+  .flag-ticker::after { right: 0; background: linear-gradient(270deg, rgba(5,11,18,.9), transparent); }
   .flag-ticker-track {
     display: flex;
     width: max-content;
-    gap: 14px;
+    gap: 16px;
+    padding: 0 14px;
     animation: ticker-scroll 40s linear infinite;
   }
   .flag-ticker:hover .flag-ticker-track { animation-play-state: paused; }
   .ticker-flag { flex-shrink: 0; line-height: 0; }
-  .ticker-flag .flag { width: 30px; height: 22px; }
+  .ticker-flag .flag {
+    width: 32px; height: 24px;
+    border-radius: 4px;
+    box-shadow: 0 0 0 1px var(--border), 0 2px 4px rgba(0,0,0,.3);
+  }
   @keyframes ticker-scroll {
     from { transform: translateX(0); }
     to { transform: translateX(-50%); }
   }
 
+  /* ----- กติกานับแต้ม ----- */
+  .rules-panel { margin-top: 4px; }
+  .rules-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; color: var(--text); }
+  .rules-list li { margin-bottom: 6px; }
+  .rules-list strong { color: var(--gold); }
+
+  /* ----- แท่นรับรางวัล (podium) ----- */
+  .podium {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 8px;
+    margin: 16px 0 22px;
+  }
+  .podium-col { display: flex; flex-direction: column; align-items: center; width: 100px; }
+  .podium-medal { font-size: 26px; }
+  .podium-name { font-size: 13px; font-weight: 700; margin-top: 2px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .podium-pts { font-size: 12px; color: var(--gold); font-weight: 700; margin-bottom: 6px; }
+  .podium-empty { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+  .podium-stand {
+    width: 100%;
+    border-radius: 8px 8px 0 0;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding-top: 6px;
+    font-weight: 900;
+    font-size: 18px;
+    color: rgba(0,0,0,.55);
+  }
+  .podium-1 .podium-stand { height: 92px; background: linear-gradient(180deg, #ffe07a, var(--gold-dark)); box-shadow: 0 0 14px rgba(255,200,69,.5); }
+  .podium-2 .podium-stand { height: 68px; background: linear-gradient(180deg, #eaeaea, #b9b9b9); }
+  .podium-3 .podium-stand { height: 50px; background: linear-gradient(180deg, #e3b48a, #b5793f); }
+  .podium-1 { order: 2; }
+  .podium-2 { order: 1; }
+  .podium-3 { order: 3; }
+
   /* ----- name modal ----- */
   .modal-overlay {
     display: none;
     position: fixed; inset: 0;
-    background: rgba(0,0,0,.6);
+    background: rgba(2,6,10,.72);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     align-items: center;
     justify-content: center;
     z-index: 100;
@@ -773,18 +913,50 @@
   }
   .modal-overlay.show { display: flex; }
   .modal-box {
-    background: var(--card-bg-2);
-    border: 1px solid var(--gold);
-    border-radius: 14px;
+    background: rgba(15,30,26,.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,213,74,.45);
+    border-radius: 16px;
     padding: 20px;
     width: 100%;
     max-width: 340px;
+    box-shadow: 0 0 40px rgba(255,213,74,.12), 0 20px 50px rgba(0,0,0,.5);
   }
+  .modal-box-wide { max-width: 460px; max-height: 80vh; display: flex; flex-direction: column; }
   .modal-box h3 { margin: 0 0 6px; color: var(--gold); font-size: 16px; }
   .modal-hint { font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
   .modal-error { color: var(--red); font-size: 12px; min-height: 16px; margin-top: 6px; }
   .modal-actions { display: flex; gap: 8px; margin-top: 12px; }
   .modal-actions button { flex: 1; }
+
+  /* ----- สรุปก่อนยืนยันการทายผล ----- */
+  .confirm-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+  .confirm-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: rgba(0,0,0,.18); border-radius: 8px; padding: 8px 10px; font-size: 13px;
+  }
+  .confirm-team { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+  .confirm-row .confirm-team:last-child { justify-content: flex-end; text-align: right; }
+  .confirm-score { font-weight: 800; color: var(--gold); white-space: nowrap; padding: 0 6px; }
+
+  /* ----- แถบยืนยันลอยด้านล่าง ----- */
+  .sticky-confirm-bar {
+    position: fixed; left: 50%; bottom: 0;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 720px;
+    background: rgba(15,30,26,.85);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-top: 1px solid rgba(255,213,74,.45);
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    z-index: 50;
+    box-shadow: 0 -8px 30px rgba(0,0,0,.45);
+    box-sizing: border-box;
+  }
+  .has-sticky-bar:last-child { margin-bottom: 70px; }
+  .already-pred-tag { font-size: 12px; color: var(--green-ok); margin-top: 8px; }
   .my-name-pill {
     background: rgba(255,200,69,.12);
     color: var(--gold);
@@ -806,18 +978,22 @@
   .tab-btn {
     flex: 1;
     background: var(--card-bg);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     border: 1px solid var(--border);
+    border-bottom: none;
     color: var(--muted);
     padding: 10px 8px;
-    border-radius: 10px 10px 0 0;
+    border-radius: 12px 12px 0 0;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
+    transition: color .15s, background .15s;
   }
   .tab-btn.active {
     background: var(--card-bg-2);
     color: var(--gold);
-    border-bottom: 3px solid var(--gold);
+    box-shadow: inset 0 -3px 0 var(--gold), 0 0 16px rgba(255,213,74,.18);
   }
 
   .container { max-width: 720px; margin: 0 auto; padding: 0 12px; }
@@ -826,10 +1002,13 @@
 
   .panel {
     background: var(--card-bg-2);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border: 1px solid var(--border);
-    border-radius: 0 0 12px 12px;
+    border-radius: 0 0 16px 16px;
     padding: 16px;
     margin-bottom: 18px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.25);
   }
   .panel h2 { font-size: 15px; margin: 0 0 12px; color: var(--gold); display: flex; align-items: center; gap: 6px; }
 
@@ -838,7 +1017,7 @@
   label.field-label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 3px; }
 
   input, select {
-    background: #06231a;
+    background: rgba(0,0,0,.28);
     border: 1px solid var(--border);
     color: var(--text);
     padding: 9px 10px;
@@ -846,34 +1025,45 @@
     font-size: 14px;
     width: 100%;
   }
-  input:focus, select:focus { outline: 2px solid var(--gold); outline-offset: -1px; }
+  input:focus, select:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
 
   button {
-    background: var(--gold);
+    background: linear-gradient(135deg, #ffe07a, var(--gold));
     color: #1a1200;
     border: none;
     padding: 10px 14px;
-    border-radius: 8px;
+    border-radius: 9px;
     cursor: pointer;
     font-size: 14px;
     font-weight: 700;
+    box-shadow: 0 0 0 1px rgba(255,213,74,.4), 0 4px 14px rgba(255,213,74,.25);
+    transition: filter .15s, transform .1s;
   }
   button:hover { filter: brightness(1.08); }
-  button:disabled { opacity: 0.35; cursor: not-allowed; }
-  .btn-primary { background: var(--gold); white-space: nowrap; }
-  .btn-tiny { padding: 6px 10px; font-size: 12px; background: var(--blue); color: white; font-weight: 600; }
-  .btn-confirm { background: var(--green-ok); color: #06241c; }
-  .btn-danger { background: var(--red); color: white; }
+  button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+  .btn-primary { background: linear-gradient(135deg, #ffe07a, var(--gold)); white-space: nowrap; }
+  .btn-tiny {
+    padding: 6px 10px; font-size: 12px; font-weight: 600;
+    background: linear-gradient(135deg, var(--blue-glow), var(--blue));
+    color: #06232b;
+    box-shadow: 0 0 0 1px rgba(34,211,238,.4), 0 4px 14px rgba(34,211,238,.2);
+  }
+  .btn-confirm { background: linear-gradient(135deg, #6cf2b4, var(--green-ok)); color: #06241c; box-shadow: 0 0 0 1px rgba(52,232,158,.4), 0 4px 14px rgba(52,232,158,.2); }
+  .btn-danger { background: linear-gradient(135deg, #ff8a96, var(--red)); color: #2a0608; box-shadow: 0 0 0 1px rgba(255,80,102,.4), 0 4px 14px rgba(255,80,102,.2); }
 
   .empty-state, .empty-row { color: var(--muted); text-align: center; padding: 24px 10px; font-size: 14px; }
 
   /* ----- match card (predict tab) ----- */
   .match-card {
     background: var(--card-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 16px;
     padding: 14px;
     margin-bottom: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.04);
   }
   .card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 6px; }
   .status-tag { padding: 3px 9px; border-radius: 12px; font-size: 12px; font-weight: 600; }
@@ -904,8 +1094,9 @@
     border-radius: 50%;
     font-size: 20px;
     line-height: 1;
-    background: var(--blue);
-    color: white;
+    background: linear-gradient(135deg, var(--blue-glow), var(--blue));
+    color: #06232b;
+    box-shadow: 0 0 0 1px rgba(34,211,238,.45), 0 0 14px rgba(34,211,238,.35);
     flex-shrink: 0;
   }
   .step-btn:active { transform: scale(0.92); }
@@ -956,6 +1147,8 @@
   #leaderboardBody tr.rank-1 td { color: var(--gold); font-weight: 800; }
   #leaderboardBody tr.rank-2 td { color: #d8d8d8; font-weight: 700; }
   #leaderboardBody tr.rank-3 td { color: #e0a978; font-weight: 700; }
+  .exact-badge { font-size: 11px; color: var(--muted); font-weight: normal; margin-left: 4px; }
+  .pts-negative { color: var(--red); font-weight: 800; }
 
   @media (max-width: 420px) {
     .hero h1 { font-size: 20px; }
@@ -975,6 +1168,18 @@
     .score-input { font-size: 24px; width: 40px; }
     .name-row { flex-wrap: wrap; }
     .name-row .btn-primary { width: 100%; }
+    .flag-ticker-outer { padding: 0 8px; }
+    .ticker-flag .flag { width: 26px; height: 19px; }
+    .podium-col { width: 78px; }
+    .podium-1 .podium-stand { height: 72px; }
+    .podium-2 .podium-stand { height: 54px; }
+    .podium-3 .podium-stand { height: 40px; }
+    .podium-name { font-size: 11px; max-width: 78px; }
+    .modal-box { padding: 16px; max-height: 85vh; overflow-y: auto; }
+    .modal-box-wide { max-height: 85vh; }
+    .confirm-row { font-size: 12px; padding: 7px 8px; gap: 4px; }
+    .confirm-team { font-size: 12px; }
+    .sticky-confirm-bar { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
   }
 </style>
 </head>
@@ -986,8 +1191,10 @@
     <button id="myNameTag" class="my-name-tag" onclick="window.__openNameModal()">👤 ตั้งชื่อ</button>
   </div>
 
-  <div class="flag-ticker">
-    <div class="flag-ticker-track" id="flagTickerTrack"></div>
+  <div class="flag-ticker-outer">
+    <div class="flag-ticker">
+      <div class="flag-ticker-track" id="flagTickerTrack"></div>
+    </div>
   </div>
 
   <div id="nameModal" class="modal-overlay">
@@ -1019,6 +1226,18 @@
     </div>
   </div>
 
+  <div id="confirmAllModal" class="modal-overlay">
+    <div class="modal-box modal-box-wide">
+      <h3>สรุปผลที่คุณทาย</h3>
+      <p class="modal-hint">ตรวจสอบให้แน่ใจก่อนยืนยัน — กด "แก้ไข" เพื่อกลับไปปรับ หรือ "ยืนยันการทายผล" เพื่อจบขั้นตอน</p>
+      <div id="confirmAllList" class="confirm-list"></div>
+      <div class="modal-actions">
+        <button class="btn-tiny" onclick="window.__closeConfirmAll()">✏️ แก้ไข</button>
+        <button class="btn-primary" onclick="window.__proceedConfirmAll()">✅ ยืนยันการทายผล</button>
+      </div>
+    </div>
+  </div>
+
   <div class="tabs">
     <button class="tab-btn active" data-tab="predict">🎯 ทายผล</button>
     <button class="tab-btn" data-tab="board">🏆 อันดับ</button>
@@ -1027,16 +1246,33 @@
 
   <div class="container">
     <div class="tab-panel active" id="tab-predict">
-      <div id="predictMatchList"></div>
+      <div id="predictMatchList" class="has-sticky-bar"></div>
+      <div class="panel rules-panel has-sticky-bar">
+        <h2>📋 กติกานับแต้ม</h2>
+        <ul class="rules-list">
+          <li><strong>ส่วนที่ 1 — ทาย HDP:</strong> เทียบระดับชนะ/แพ้ค่าต่อ (ชนะเต็ม/ชนะครึ่ง/push/แพ้ครึ่ง/แพ้เต็ม) กับผลจริง ได้คะแนนตั้งแต่ <strong>+1, +0.5, 0, -0.5, ไปจนถึง -1</strong></li>
+          <li><strong>ส่วนที่ 2 — ทายสกอร์:</strong> ทายสกอร์ดิบตรงเป๊ะทุกตัว ได้โบนัส <strong>+3</strong> ถ้าไม่ตรง โดน <strong>-1</strong></li>
+          <li>คะแนนรวมต่อแมตช์ = ส่วนที่ 1 + ส่วนที่ 2 (สูงสุด <strong>+4</strong> ถ้าทายตรงเป๊ะ / ต่ำสุด <strong>-2</strong> ถ้าทายผิดทุกอย่าง)</li>
+        </ul>
+      </div>
     </div>
 
     <div class="tab-panel" id="tab-board">
+      <div id="podiumWrap"></div>
       <div class="panel">
         <h2>🏆 ตารางคะแนนรวม</h2>
         <table class="pred-table">
           <thead><tr><th></th><th>ชื่อ</th><th>คะแนนรวม</th></tr></thead>
           <tbody id="leaderboardBody"></tbody>
         </table>
+      </div>
+      <div class="panel rules-panel">
+        <h2>📋 กติกานับแต้ม</h2>
+        <ul class="rules-list">
+          <li><strong>ส่วนที่ 1 — ทาย HDP:</strong> +1 / +0.5 / 0 / -0.5 / -1 ตามความใกล้เคียงระดับชนะ-แพ้ค่าต่อ</li>
+          <li><strong>ส่วนที่ 2 — ทายสกอร์:</strong> ตรงเป๊ะ +3, ไม่ตรง -1</li>
+          <li>ถ้าคะแนนรวมเท่ากัน จัดอันดับด้วยจำนวนครั้งที่ทายสกอร์ตรงเป๊ะ (🎯) มากกว่า</li>
+        </ul>
       </div>
     </div>
 
@@ -1096,6 +1332,10 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <div id="stickyConfirmBar" class="sticky-confirm-bar">
+    <button class="btn-primary" style="width:100%" onclick="window.__openConfirmAll()">✅ ยืนยันการทายผล</button>
   </div>
 </body>
 </html>
