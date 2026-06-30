@@ -323,6 +323,7 @@
   window.__proceedConfirmAll = () => {
     const items = collectPendingPredictions();
     if (items.length === 0) return;
+    $('#confirmAllModal').classList.remove('show');
     openPinModal(items.map(i => i.match.id));
   };
 
