@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>World Cup 2026</title>
+<title>ทายผลบอลกับเพื่อน</title>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -101,6 +101,15 @@
     $('#teamB').innerHTML = options;
   }
   populateTeamSelects();
+
+  function populateFlagTicker() {
+    const track = $('#flagTickerTrack');
+    if (!track) return;
+    // วน 2 ชุดติดกันเพื่อให้แอนิเมชันเลื่อนวนลูปไม่มีรอยต่อ
+    const oneSet = TEAMS.map(t => `<span class="ticker-flag">${flagImg(t.code)}</span>`).join('');
+    track.innerHTML = oneSet + oneSet;
+  }
+  populateFlagTicker();
 
   function populateHourSelect() {
     const opts = [];
@@ -731,6 +740,27 @@
     font-weight: 600;
   }
 
+  /* ----- ธงชาติวิ่งเลื่อน ----- */
+  .flag-ticker {
+    overflow: hidden;
+    background: var(--pitch-dark);
+    border-bottom: 2px solid var(--gold);
+    padding: 8px 0;
+  }
+  .flag-ticker-track {
+    display: flex;
+    width: max-content;
+    gap: 14px;
+    animation: ticker-scroll 40s linear infinite;
+  }
+  .flag-ticker:hover .flag-ticker-track { animation-play-state: paused; }
+  .ticker-flag { flex-shrink: 0; line-height: 0; }
+  .ticker-flag .flag { width: 30px; height: 22px; }
+  @keyframes ticker-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+
   /* ----- name modal ----- */
   .modal-overlay {
     display: none;
@@ -950,10 +980,14 @@
 </head>
 <body>
   <div class="hero">
-    <h1>⚽ ทายผลบอลโลก 2026</h1>
+    <h1>⚽ World Cup 2026</h1>
     <div class="sub">ทายผล • เลือกทีม • ใส่ HDP • ลุ้นแชมป์กับเพื่อน</div>
     <div id="status">กำลังเชื่อมต่อ...</div>
     <button id="myNameTag" class="my-name-tag" onclick="window.__openNameModal()">👤 ตั้งชื่อ</button>
+  </div>
+
+  <div class="flag-ticker">
+    <div class="flag-ticker-track" id="flagTickerTrack"></div>
   </div>
 
   <div id="nameModal" class="modal-overlay">
