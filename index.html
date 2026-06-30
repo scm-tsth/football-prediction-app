@@ -11,8 +11,7 @@
     onSnapshot, query, orderBy, where, getDocs, getDoc, serverTimestamp
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   import {
-    getAuth, signInAnonymously, onAuthStateChanged,
-    GoogleAuthProvider, signInWithPopup, signOut
+    getAuth, signInAnonymously, onAuthStateChanged
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
   // ==== กรอกค่า Firebase config ของคุณตรงนี้ ====
@@ -28,10 +27,9 @@
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
   const auth = getAuth(app);
-  const googleProvider = new GoogleAuthProvider();
 
-  // UID ของ Google account ที่เป็นแอดมินคนเดียว (ใส่หลังล็อกอินครั้งแรก)
-  const ADMIN_UID = "PASTE_YOUR_ADMIN_UID_HERE";
+  // รหัสผ่านโหมดแอดมิน (เปลี่ยนได้ตามต้องการ)
+  const ADMIN_PASSWORD = "Curry30!";
 
   // 32 ทีมที่เข้ารอบ 32 ทีมสุดท้าย ฟุตบอลโลก 2026
   const TEAMS = [
@@ -111,8 +109,10 @@
     });
   });
 
+  let adminUnlocked = sessionStorage.getItem('adminUnlocked') === '1';
+
   function isAdmin() {
-    return !!currentUser && !currentUser.isAnonymous && currentUser.uid === ADMIN_UID;
+    return adminUnlocked;
   }
 
   onAuthStateChanged(auth, (user) => {
@@ -128,19 +128,24 @@
     }
   });
 
-  window.__adminLogin = async () => {
+  window.__adminLogin = () => {
     const errEl = $('#adminLoginError');
-    if (errEl) errEl.textContent = '';
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (e) {
-      if (errEl) errEl.textContent = 'เข้าสู่ระบบไม่สำเร็จ: ' + e.message;
+    const entered = $('#adminPasswordInput').value;
+    if (entered !== ADMIN_PASSWORD) {
+      if (errEl) errEl.textContent = 'รหัสผ่านไม่ถูกต้อง';
+      return;
     }
+    adminUnlocked = true;
+    sessionStorage.setItem('adminUnlocked', '1');
+    if (errEl) errEl.textContent = '';
+    $('#adminPasswordInput').value = '';
+    renderAdminGate();
   };
 
-  window.__adminLogout = async () => {
-    await signOut(auth);
-    await signInAnonymously(auth);
+  window.__adminLogout = () => {
+    adminUnlocked = false;
+    sessionStorage.removeItem('adminUnlocked');
+    renderAdminGate();
   };
 
   function renderAdminGate() {
@@ -150,13 +155,10 @@
     if (isAdmin()) {
       gate.style.display = 'none';
       panelWrap.style.display = 'block';
-      $('#adminWhoami').textContent = `เข้าสู่ระบบเป็นแอดมิน: ${currentUser.displayName || currentUser.email}`;
+      $('#adminWhoami').textContent = `🔓 โหมดแอดมิน (ปลดล็อกแล้ว)`;
     } else {
       gate.style.display = 'block';
       panelWrap.style.display = 'none';
-      if (currentUser && !currentUser.isAnonymous) {
-        $('#adminLoginError') && ($('#adminLoginError').textContent = 'บัญชีนี้ไม่ใช่แอดมิน กรุณาออกจากระบบแล้วลองใหม่ด้วยบัญชีแอดมิน');
-      }
     }
   }
 
@@ -893,9 +895,10 @@
     <div class="tab-panel" id="tab-admin">
       <div class="panel" id="adminLoginGate">
         <h2>🔒 สำหรับแอดมินเท่านั้น</h2>
-        <p class="modal-hint">เข้าสู่ระบบด้วย Google account ของแอดมินเพื่อสร้าง/จัดการแมตช์</p>
-        <button class="btn-primary" style="width:100%" onclick="window.__adminLogin()">เข้าสู่ระบบด้วย Google</button>
+        <p class="modal-hint">กรอกรหัสผ่านแอดมินเพื่อสร้าง/จัดการแมตช์</p>
+        <input type="password" id="adminPasswordInput" placeholder="รหัสผ่านแอดมิน" onkeydown="if(event.key==='Enter')window.__adminLogin()">
         <div class="modal-error" id="adminLoginError"></div>
+        <button class="btn-primary" style="width:100%; margin-top:8px" onclick="window.__adminLogin()">ปลดล็อก</button>
       </div>
 
       <div id="adminPanels" style="display:none">
