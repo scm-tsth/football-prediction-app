@@ -112,16 +112,11 @@
   populateFlagTicker();
 
   function populateHourSelect() {
-    const opts = [];
-    for (let h = 0; h < 24; h++) {
-      for (let m = 0; m < 60; m += 30) {
-        const hh = String(h).padStart(2, '0');
-        const mm = String(m).padStart(2, '0');
-        opts.push(`<option value="${hh}:${mm}">${hh}:${mm} น.</option>`);
-      }
-    }
-    $('#matchHour').innerHTML = opts.join('');
+    const opts = hourOptionsHtml('20:00');
+    $('#matchHour').innerHTML = opts;
     $('#matchHour').value = '20:00';
+    $('#deadlineHour').innerHTML = opts;
+    $('#deadlineHour').value = '20:00';
   }
   populateHourSelect();
 
@@ -337,6 +332,9 @@
     const matchDate = $('#matchDate').value;
     const matchHour = $('#matchHour').value;
     const matchTime = matchDate ? `${matchDate} ${matchHour} น.` : '';
+    const deadlineDate = $('#deadlineDate').value;
+    const deadlineHour = $('#deadlineHour').value;
+    const deadline = deadlineDate ? `${deadlineDate}T${deadlineHour}:00` : '';
 
     if (!teamA || !teamB) { alert('กรุณาเลือกทีมทั้งสองฝั่ง'); return; }
     if (teamA === teamB) { alert('กรุณาเลือกทีมที่ไม่ซ้ำกัน'); return; }
@@ -346,6 +344,7 @@
       hdp: hdp || '0',
       hdpSide,
       matchTime: matchTime || '',
+      deadline: deadline || '',
       status: 'open',
       resultA: null,
       resultB: null,
@@ -354,6 +353,7 @@
 
     $('#hdpValue').value = '';
     $('#matchDate').value = '';
+    $('#deadlineDate').value = '';
     populateTeamSelects();
     populateHourSelect();
   });
@@ -433,6 +433,51 @@
     renderAdminList();
   }
 
+  // ---------- ตัวนับถอยหลังหมดเวลาทาย ----------
+  function updateCountdowns() {
+    $$('.countdown-box[data-deadline]').forEach((el) => {
+      const deadline = el.dataset.deadline;
+      const target = new Date(deadline).getTime();
+      if (isNaN(target)) { el.textContent = ''; return; }
+
+      const diff = target - Date.now();
+      const d = new Date(deadline);
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mo = String(d.getMonth() + 1).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mi = String(d.getMinutes()).padStart(2, '0');
+
+      if (diff <= 0) {
+        el.innerHTML = `⏰ <strong>หมดเวลาทายแล้ว — กำลังล็อกแมตช์...</strong> (หมดเขตเมื่อ ${dd}/${mo} ${hh}.${mi} น.)`;
+        el.classList.add('countdown-expired');
+        const matchId = el.dataset.matchId;
+        const m = matches.find(x => x.id === matchId);
+        if (m && m.status === 'open') autoLockMatch(matchId);
+        return;
+      }
+      el.classList.remove('countdown-expired');
+      const totalMinutes = Math.floor(diff / 60000);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = String(totalMinutes % 60).padStart(2, '0');
+      el.innerHTML = `⏳ หมดเวลาทายใน ${dd}/${mo} ${hh}.${mi} น. — เหลืออีก ${hours}.${minutes} ชม.`;
+    });
+  }
+  setInterval(updateCountdowns, 1000);
+
+  // ล็อกแมตช์อัตโนมัติเมื่อหมดเวลาทาย (ทำงานจากเครื่องใครก็ได้ที่เปิดหน้านี้ค้างอยู่ตอนหมดเวลา)
+  const autoLockingInProgress = new Set();
+  async function autoLockMatch(matchId) {
+    if (autoLockingInProgress.has(matchId)) return;
+    autoLockingInProgress.add(matchId);
+    try {
+      await updateDoc(doc(db, 'matches', matchId), { status: 'locked' });
+    } catch (e) {
+      // เงียบไว้ — เดี๋ยวเครื่องอื่นที่เปิดหน้านี้อยู่จะล็อกให้แทน
+    } finally {
+      autoLockingInProgress.delete(matchId);
+    }
+  }
+
   // ---------- รายการแมตช์ฝั่งทายผล (เรียบง่าย เน้นแตะง่าย) ----------
   function renderPredictList() {
     const container = $('#predictMatchList');
@@ -457,6 +502,7 @@
           <span class="status-tag status-${m.status}">${statusText(m.status)}</span>
           ${m.matchTime ? `<span class="match-time">⏰ ${m.matchTime}</span>` : ''}
         </div>
+        ${(isOpen && m.deadline) ? `<div class="countdown-box" id="countdown-${m.id}" data-deadline="${m.deadline}" data-match-id="${m.id}"></div>` : ''}
 
         <div class="vs-row">
           <div class="team-col">
@@ -496,16 +542,17 @@
 
         ${(predictions[m.id] || []).length > 0 ? `
           <details class="pred-details">
-            <summary>ดูผลทายของเพื่อน (${(predictions[m.id] || []).length} คน)${isOpen ? ' — ชื่อจะซ่อนจนกว่าแมตช์จะล็อก' : ''}</summary>
+            <summary>ดูว่าใครทายแล้วบ้าง (${(predictions[m.id] || []).length} คน)${isOpen ? ' — สกอร์จะซ่อนจนกว่าแมตช์จะล็อก' : ''}</summary>
             <table class="pred-table">
               <thead><tr><th>ผู้ทาย</th><th>ทาย</th><th>คะแนน</th></tr></thead>
               <tbody>
                 ${(predictions[m.id] || []).map((p, idx) => {
                   const pts = calcPoints(p, m);
                   const isMe = p.uid === currentUser.uid;
-                  const displayName = isMe ? `${p.name} (คุณ)` : (isOpen ? `ผู้เล่นนิรนาม #${idx + 1}` : p.name);
+                  const displayName = isMe ? `${p.name} (คุณ)` : p.name;
+                  const scoreCell = (isOpen && !isMe) ? '✅ ทายแล้ว' : `${p.scoreA} - ${p.scoreB}`;
                   const ptsCell = pts === null ? '-' : `<span class="${pts < 0 ? 'pts-negative' : ''}">${pts < 0 ? '⚠️ ' : '🎯 '}${pts}</span>`;
-                  return `<tr class="${isMe ? 'me-row' : ''}"><td>${displayName}</td><td>${p.scoreA} - ${p.scoreB}</td><td>${ptsCell}</td></tr>`;
+                  return `<tr class="${isMe ? 'me-row' : ''}"><td>${displayName}</td><td>${scoreCell}</td><td>${ptsCell}</td></tr>`;
                 }).join('')}
               </tbody>
             </table>
@@ -514,6 +561,22 @@
       `;
       container.appendChild(card);
     });
+    updateCountdowns();
+  }
+
+  // แสดงรายชื่อคนที่ทายแล้ว (เฉพาะแมตช์ที่ยังเปิดทาย) ให้แอดมินดูก่อนตัดสินใจล็อก
+  function renderParticipants(matchId) {
+    const list = predictions[matchId] || [];
+    if (list.length === 0) {
+      return '<div class="participants-box participants-empty">👥 ยังไม่มีใครทายแมตช์นี้</div>';
+    }
+    const names = list.map(p => `<span class="participant-pill">${p.name}</span>`).join('');
+    return `
+      <div class="participants-box">
+        <div class="participants-count">👥 ทายแล้ว ${list.length} คน</div>
+        <div class="participants-pills">${names}</div>
+      </div>
+    `;
   }
 
   // ---------- รายการแมตช์ฝั่งแอดมิน (จัดการ/ใส่ผล) ----------
@@ -534,6 +597,8 @@
       if (editingMatchId === m.id) {
         const [editDate, editHourRaw] = (m.matchTime || '').split(' ');
         const editHour = (editHourRaw || '').replace(' น.', '').replace('น.', '');
+        const [editDeadlineDate, editDeadlineHourRaw] = (m.deadline || '').split('T');
+        const editDeadlineHour = (editDeadlineHourRaw || '').slice(0, 5);
         card.innerHTML = `
           <div class="form-grid">
             <div>
@@ -563,6 +628,14 @@
               <label class="field-label">เวลาแข่ง</label>
               <select id="editHour-${m.id}">${hourOptionsHtml(editHour || '20:00')}</select>
             </div>
+            <div>
+              <label class="field-label">⏳ วันหมดเวลาทาย</label>
+              <input type="date" id="editDeadlineDate-${m.id}" value="${editDeadlineDate || ''}">
+            </div>
+            <div>
+              <label class="field-label">⏳ เวลาหมดเวลาทาย</label>
+              <select id="editDeadlineHour-${m.id}">${hourOptionsHtml(editDeadlineHour || '20:00')}</select>
+            </div>
             <div class="full admin-row">
               <button class="btn-tiny btn-confirm" onclick="window.__saveEditMatch('${m.id}')">💾 บันทึก</button>
               <button class="btn-tiny" onclick="window.__cancelEditMatch()">ยกเลิก</button>
@@ -581,6 +654,7 @@
           <span class="status-tag status-${m.status}">${statusText(m.status)}</span>
         </div>
         ${m.matchTime ? `<div class="match-time">⏰ ${m.matchTime}</div>` : ''}
+        ${m.status === 'open' ? renderParticipants(m.id) : ''}
         <div class="admin-row">
           <button class="btn-tiny" onclick="window.__toggleLock('${m.id}', '${m.status}')" ${m.status === 'finished' ? 'disabled' : ''}>${m.status === 'open' ? '🔒 ล็อกแมตช์' : '🔓 เปิดล็อก'}</button>
           <button class="btn-tiny" onclick="window.__startEditMatch('${m.id}')">✏️ แก้ไข</button>
@@ -617,12 +691,15 @@
     const matchDate = $(`#editDate-${matchId}`).value;
     const matchHour = $(`#editHour-${matchId}`).value;
     const matchTime = matchDate ? `${matchDate} ${matchHour} น.` : '';
+    const deadlineDate = $(`#editDeadlineDate-${matchId}`).value;
+    const deadlineHour = $(`#editDeadlineHour-${matchId}`).value;
+    const deadline = deadlineDate ? `${deadlineDate}T${deadlineHour}:00` : '';
 
     if (!teamA || !teamB) { alert('กรุณาเลือกทีมทั้งสองฝั่ง'); return; }
     if (teamA === teamB) { alert('กรุณาเลือกทีมที่ไม่ซ้ำกัน'); return; }
 
     await updateDoc(doc(db, 'matches', matchId), {
-      teamA, teamB, hdp: hdp || '0', hdpSide, matchTime: matchTime || ''
+      teamA, teamB, hdp: hdp || '0', hdpSide, matchTime: matchTime || '', deadline: deadline || ''
     });
     editingMatchId = null;
     renderAdminList();
@@ -668,6 +745,16 @@
     await deleteDoc(doc(db, 'matches', matchId));
   };
 
+  // ซ่อนชื่อจริงในตารางอันดับ/แท่นรับรางวัล — ใช้นามแฝงคงที่ (hash จากชื่อ) แทน
+  function hashName(name) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return h % 1000;
+  }
+  function anonLabel(name) {
+    return `ผู้เล่น #${String(hashName(name)).padStart(3, '0')}`;
+  }
+
   function renderLeaderboard() {
     const totals = {};
     const exactCounts = {};
@@ -687,9 +774,11 @@
     });
     const medals = ['🥇', '🥈', '🥉'];
     const tbody = $('#leaderboardBody');
-    tbody.innerHTML = rows.map(([name, pts], i) =>
-      `<tr class="${i < 3 ? 'rank-' + (i + 1) : ''}"><td>${medals[i] || (i + 1)}</td><td>${name}</td><td><span class="${pts < 0 ? 'pts-negative' : ''}">${pts}</span><span class="exact-badge" title="ทายตรงเป๊ะ ${exactCounts[name] || 0} ครั้ง">${exactCounts[name] ? ' 🎯×' + exactCounts[name] : ''}</span></td></tr>`
-    ).join('') || '<tr><td colspan="3" class="empty-row">ยังไม่มีผลคะแนน</td></tr>';
+    tbody.innerHTML = rows.map(([name, pts], i) => {
+      const isMe = name === myName;
+      const displayName = isMe ? `${anonLabel(name)} (คุณ)` : anonLabel(name);
+      return `<tr class="${i < 3 ? 'rank-' + (i + 1) : ''} ${isMe ? 'me-row' : ''}"><td>${medals[i] || (i + 1)}</td><td>${displayName}</td><td><span class="${pts < 0 ? 'pts-negative' : ''}">${pts}</span><span class="exact-badge" title="ทายตรงเป๊ะ ${exactCounts[name] || 0} ครั้ง">${exactCounts[name] ? ' 🎯×' + exactCounts[name] : ''}</span></td></tr>`;
+    }).join('') || '<tr><td colspan="3" class="empty-row">ยังไม่มีผลคะแนน</td></tr>';
 
     renderPodium(rows);
   }
@@ -705,10 +794,12 @@
       if (!entry) return `<div class="podium-col podium-${place}"><div class="podium-empty">-</div><div class="podium-stand"></div></div>`;
       const [name, pts] = entry;
       const medal = place === 1 ? '🥇' : place === 2 ? '🥈' : '🥉';
+      const isMe = name === myName;
+      const displayName = isMe ? `${anonLabel(name)} (คุณ)` : anonLabel(name);
       return `
         <div class="podium-col podium-${place}">
           <div class="podium-medal">${medal}</div>
-          <div class="podium-name">${name}</div>
+          <div class="podium-name">${displayName}</div>
           <div class="podium-pts">${pts} แต้ม</div>
           <div class="podium-stand">${place}</div>
         </div>`;
@@ -1039,6 +1130,17 @@
   .status-locked { background: rgba(255,106,0,.15); color: var(--gold); }
   .status-finished { background: rgba(255,255,255,.08); color: var(--muted); }
   .match-time { color: var(--muted); font-size: 12px; }
+  .countdown-box {
+    background: rgba(255,106,0,.1);
+    border: 1px dashed var(--gold-dark);
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: var(--gold);
+    font-weight: 600;
+  }
+  .countdown-box.countdown-expired { background: rgba(239,68,68,.12); border-color: var(--red); color: var(--red); }
 
   .vs-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 6px 0 12px; }
   .team-col { text-align: center; flex: 1; max-width: 130px; }
@@ -1092,6 +1194,26 @@
   .team-mini { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; }
   .admin-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
   .score-input-small { width: 64px; text-align: center; }
+
+  /* ----- รายชื่อคนที่ทายแล้ว (ฝั่งแอดมิน) ----- */
+  .participants-box {
+    background: rgba(0,0,0,.2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-top: 8px;
+  }
+  .participants-empty { font-size: 12px; color: var(--muted); }
+  .participants-count { font-size: 12px; color: var(--blue-glow); font-weight: 700; margin-bottom: 6px; }
+  .participants-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+  .participant-pill {
+    background: rgba(79,131,204,.15);
+    color: var(--text);
+    border: 1px solid rgba(79,131,204,.35);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+  }
 
   /* ----- leaderboard ----- */
   #leaderboardBody td:first-child { font-size: 16px; text-align: center; width: 36px; }
@@ -1270,6 +1392,14 @@
             <div>
               <label class="field-label">เวลาแข่ง</label>
               <select id="matchHour"></select>
+            </div>
+            <div>
+              <label class="field-label">⏳ วันหมดเวลาทาย</label>
+              <input type="date" id="deadlineDate">
+            </div>
+            <div>
+              <label class="field-label">⏳ เวลาหมดเวลาทาย</label>
+              <select id="deadlineHour"></select>
             </div>
             <div class="full">
               <button id="createMatchBtn" style="width:100%">⚽ สร้างแมตช์</button>
