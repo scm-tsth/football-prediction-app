@@ -33,38 +33,14 @@
 
   // 32 ทีมที่เข้ารอบ 32 ทีมสุดท้าย ฟุตบอลโลก 2026
   const TEAMS = [
-    { code: 'mx', name: 'เม็กซิโก' },
-    { code: 'za', name: 'แอฟริกาใต้' },
-    { code: 'ch', name: 'สวิตเซอร์แลนด์' },
-    { code: 'ca', name: 'แคนาดา' },
-    { code: 'ba', name: 'บอสเนียและเฮอร์เซโกวีนา' },
-    { code: 'br', name: 'บราซิล' },
     { code: 'ma', name: 'โมร็อกโก' },
-    { code: 'us', name: 'สหรัฐอเมริกา' },
-    { code: 'au', name: 'ออสเตรเลีย' },
-    { code: 'py', name: 'ปารากวัย' },
-    { code: 'de', name: 'เยอรมนี' },
-    { code: 'ci', name: 'ไอวอรีโคสต์' },
-    { code: 'nl', name: 'เนเธอร์แลนด์' },
-    { code: 'jp', name: 'ญี่ปุ่น' },
-    { code: 'se', name: 'สวีเดน' },
-    { code: 'be', name: 'เบลเยียม' },
-    { code: 'eg', name: 'อียิปต์' },
-    { code: 'es', name: 'สเปน' },
-    { code: 'cv', name: 'กาบูเวร์ดี' },
-    { code: 'ec', name: 'เอกวาดอร์' },
     { code: 'fr', name: 'ฝรั่งเศส' },
     { code: 'no', name: 'นอร์เวย์' },
-    { code: 'sn', name: 'เซเนกัล' },
-    { code: 'ar', name: 'อาร์เจนตินา' },
-    { code: 'at', name: 'ออสเตรีย' },
-    { code: 'dz', name: 'แอลจีเรีย' },
-    { code: 'co', name: 'โคลอมเบีย' },
-    { code: 'pt', name: 'โปรตุเกส' },
-    { code: 'cd', name: 'คองโก (DR Congo)' },
     { code: 'gb-eng', name: 'อังกฤษ' },
-    { code: 'hr', name: 'โครเอเชีย' },
-    { code: 'gh', name: 'กานา' },
+    { code: 'es', name: 'สเปน' },
+    { code: 'be', name: 'เบลเยียม' },
+    { code: 'ar', name: 'อาร์เจนตินา' },
+    { code: 'ch', name: 'สวิตเซอร์แลนด์' },
   ];
   const TEAM_BY_CODE = Object.fromEntries(TEAMS.map(t => [t.code, t]));
   const flagImg = (code, size = 'sm') => `<img class="flag flag-${size}" src="https://flagcdn.com/w80/${code}.png" alt="${TEAM_BY_CODE[code]?.name || code}">`;
@@ -184,72 +160,133 @@
     }
   }
 
-  function init() {
-    $('#status').textContent = "🟢 พร้อมใช้งาน";
-    listenMatches();
-    if (!myName) {
-      openNameModal(true);
-    } else {
-      $('#myNameTag').textContent = `👤 ${myName}`;
-    }
-  }
-
-  // ---------- ระบบจองชื่อ + รหัส 4 หลัก (กันชื่อซ้ำ/สวมชื่อ) ----------
+  // ---------- ระบบ Login ด้วย Password 4 หลัก ----------
   let myPin = localStorage.getItem('predictorPin') || '';
 
-  function openNameModal(isFirstTime) {
-    $('#nameModalTitle').textContent = isFirstTime ? 'ตั้งชื่อ + รหัส 4 หลัก' : 'เปลี่ยนชื่อ / รหัส';
-    $('#nameModalInput').value = isFirstTime ? '' : myName;
-    $('#nameModalPin').value = '';
-    $('#nameModalError').textContent = '';
-    $('#nameModal').classList.add('show');
-    $('#nameModalCancel').style.display = isFirstTime ? 'none' : 'inline-block';
-    setTimeout(() => $('#nameModalInput').focus(), 50);
+  async function init() {
+    $('#status').textContent = "🟢 พร้อมใช้งาน";
+    listenMatches();
+    if (myPin && myName) {
+      // ตรวจสอบ PIN จาก Firestore (auto-login)
+      const snap = await getDoc(doc(db, 'players', myPin));
+      if (snap.exists() && snap.data().name === myName) {
+        // อัพเดท uid เผื่อเปลี่ยนอุปกรณ์
+        await setDoc(doc(db, 'players', myPin), { uid: currentUser.uid }, { merge: true });
+        $('#myNameTag').textContent = `👤 ${myName}`;
+      } else {
+        // PIN หมดอายุหรือชื่อไม่ตรง → login ใหม่
+        localStorage.removeItem('predictorName');
+        localStorage.removeItem('predictorPin');
+        myName = ''; myPin = '';
+        openLoginModal();
+      }
+    } else {
+      openLoginModal();
+    }
   }
 
-  window.__openNameModal = () => openNameModal(false);
+  function openLoginModal() {
+    $('#loginStep1').style.display = '';
+    $('#loginStep2Return').style.display = 'none';
+    $('#loginStep2New').style.display = 'none';
+    $('#loginPinInput').value = '';
+    $('#loginPinError').textContent = '';
+    $('#loginModal').classList.add('show');
+    setTimeout(() => $('#loginPinInput').focus(), 50);
+  }
 
-  window.__closeNameModal = () => {
-    if (!myName) return; // ครั้งแรกห้ามปิดจนกว่าจะตั้งชื่อ
-    $('#nameModal').classList.remove('show');
+  window.__openLoginModal = () => openLoginModal();
+
+  window.__closeLoginModal = () => {
+    if (!myName) return;
+    $('#loginModal').classList.remove('show');
   };
 
-  window.__saveName = async () => {
-    const name = $('#nameModalInput').value.trim();
-    const pin = $('#nameModalPin').value.trim();
-    const errEl = $('#nameModalError');
-    if (!name) { errEl.textContent = 'กรุณากรอกชื่อ'; return; }
-    if (name.length > 24) { errEl.textContent = 'ชื่อยาวเกินไป'; return; }
-    if (!/^\d{4}$/.test(pin)) { errEl.textContent = 'กรุณากรอกรหัส 4 หลัก (ตัวเลขเท่านั้น) ไว้ยืนยันตัวตนตอนทายผล'; return; }
+  window.__loginBack = () => {
+    $('#loginStep1').style.display = '';
+    $('#loginStep2Return').style.display = 'none';
+    $('#loginStep2New').style.display = 'none';
+    $('#loginPinInput').value = '';
+    $('#loginPinError').textContent = '';
+    setTimeout(() => $('#loginPinInput').focus(), 50);
+  };
 
-    const q = query(collection(db, 'players'), where('name', '==', name));
-    const snap = await getDocs(q);
-    const otherDoc = snap.docs.find(d => d.id !== currentUser.uid);
-    if (otherDoc) {
-      if (otherDoc.data().pin !== pin) {
-        errEl.textContent = 'ชื่อนี้ถูกจองไว้แล้ว ใส่รหัส 4 หลักเดิมของชื่อนี้เพื่อยืนยันว่าเป็นคุณจริง';
-        return;
-      }
-      // รหัสตรง = เป็นเจ้าของเดิมที่ย้ายเครื่อง/ล้าง cache มา ย้ายสิทธิ์ชื่อมาที่ uid ปัจจุบัน
-      await setDoc(doc(db, 'players', currentUser.uid), { name, pin, uid: currentUser.uid, updatedAt: serverTimestamp() });
+  window.__checkLoginPin = async () => {
+    const pin = $('#loginPinInput').value.trim();
+    const errEl = $('#loginPinError');
+    if (!/^\d{4}$/.test(pin)) { errEl.textContent = 'กรุณากรอก 4 หลัก (ตัวเลขเท่านั้น)'; return; }
+    errEl.textContent = 'กำลังตรวจสอบ...';
+    const snap = await getDoc(doc(db, 'players', pin));
+    errEl.textContent = '';
+    if (snap.exists()) {
+      // PIN ถูกจองแล้ว — แสดงหน้า returning user
+      $('#loginReturnName').textContent = snap.data().name;
+      $('#loginStep1').style.display = 'none';
+      $('#loginStep2Return').style.display = '';
+      $('#loginModal').dataset.pin = pin;
+      $('#loginModal').dataset.rname = snap.data().name;
     } else {
-      await setDoc(doc(db, 'players', currentUser.uid), { name, pin, uid: currentUser.uid, updatedAt: serverTimestamp() });
+      // PIN ว่าง — แสดงหน้าสร้างบัญชีใหม่
+      $('#loginStep1').style.display = 'none';
+      $('#loginStep2New').style.display = '';
+      $('#loginNewName').value = '';
+      $('#loginNewError').textContent = '';
+      $('#loginModal').dataset.pin = pin;
+      setTimeout(() => $('#loginNewName').focus(), 50);
     }
+  };
 
-    myName = name;
-    myPin = pin;
+  // Enter key ใน PIN input ให้กด check ทันที
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('loginPinInput')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') window.__checkLoginPin();
+    });
+    document.getElementById('loginNewName')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') window.__loginCreate();
+    });
+  });
+
+  window.__loginReturn = async () => {
+    const pin = $('#loginModal').dataset.pin;
+    const name = $('#loginModal').dataset.rname;
+    await setDoc(doc(db, 'players', pin), { uid: currentUser.uid, updatedAt: serverTimestamp() }, { merge: true });
+    myName = name; myPin = pin;
     localStorage.setItem('predictorName', name);
     localStorage.setItem('predictorPin', pin);
     $('#myNameTag').textContent = `👤 ${myName}`;
-    $('#nameModal').classList.remove('show');
+    $('#loginModal').classList.remove('show');
+    renderMatches();
+  };
+
+  window.__loginCreate = async () => {
+    const pin = $('#loginModal').dataset.pin;
+    const name = $('#loginNewName').value.trim();
+    const errEl = $('#loginNewError');
+    if (!name) { errEl.textContent = 'กรุณากรอกชื่อ'; return; }
+    if (name.length > 24) { errEl.textContent = 'ชื่อยาวเกินไป (สูงสุด 24 ตัว)'; return; }
+    // ป้องกัน race condition — check อีกครั้งก่อน write
+    errEl.textContent = 'กำลังสร้างบัญชี...';
+    const snap = await getDoc(doc(db, 'players', pin));
+    if (snap.exists()) {
+      errEl.textContent = '⚠️ รหัสนี้ถูกใช้งานไปแล้ว กด "← กลับ" แล้วเลือกรหัสใหม่';
+      return;
+    }
+    await setDoc(doc(db, 'players', pin), { name, uid: currentUser.uid, createdAt: serverTimestamp() });
+    myName = name; myPin = pin;
+    localStorage.setItem('predictorName', name);
+    localStorage.setItem('predictorPin', pin);
+    errEl.textContent = '';
+    $('#myNameTag').textContent = `👤 ${myName}`;
+    $('#loginModal').classList.remove('show');
     renderMatches();
   };
 
   // ---------- ยืนยันรหัส 4 หลักก่อนส่งทายผล (ส่งทีเดียวทุกแมตช์ที่เปิดอยู่) ----------
-  let pendingMatchIds = [];
+  // pendingPreds: array of { matchId, scoreA, scoreB, match }
+  let pendingPreds = [];
 
-  function openPinModal(matchIds) {
-    pendingMatchIds = matchIds;
+  function openPinModal(preds) {
+    pendingPreds = preds;
     $('#pinModalNameLabel').textContent = myName;
     $('#pinModalInput').value = '';
     $('#pinModalError').textContent = '';
@@ -258,7 +295,7 @@
   }
 
   window.__closePinModal = () => {
-    pendingMatchIds = [];
+    pendingPreds = [];
     $('#pinModal').classList.remove('show');
   };
 
@@ -267,19 +304,20 @@
     const errEl = $('#pinModalError');
     if (!/^\d{4}$/.test(pin)) { errEl.textContent = 'กรอกรหัส 4 หลัก'; return; }
 
-    const snap = await getDoc(doc(db, 'players', currentUser.uid));
-    const realPin = snap.exists() ? snap.data().pin : null;
-    if (pin !== realPin) {
+    const snap = await getDoc(doc(db, 'players', pin));
+    if (!snap.exists() || snap.data().name !== myName) {
       errEl.textContent = 'รหัสไม่ถูกต้อง ไม่สามารถยืนยันตัวตนได้';
       return;
     }
 
     $('#pinModal').classList.remove('show');
-    for (const matchId of pendingMatchIds) {
-      await actuallySubmitPred(matchId);
+    const submitted = [...pendingPreds];
+    for (const pred of submitted) {
+      await actuallySubmitPred(pred.matchId, pred.scoreA, pred.scoreB);
     }
-    pendingMatchIds = [];
+    pendingPreds = [];
     $('#confirmAllModal').classList.remove('show');
+    showSubmitSummary(submitted);
   };
 
   // ---------- รวบรวมการทายทั้งหมด -> หน้าต่างสรุป -> ยืนยันด้วยรหัส 4 หลัก ----------
@@ -294,7 +332,7 @@
   }
 
   window.__openConfirmAll = () => {
-    if (!myName) { openNameModal(true); return; }
+    if (!myName) { openLoginModal(); return; }
     const items = collectPendingPredictions();
     if (items.length === 0) {
       alert('ยังไม่มีแมตช์ที่เปิดให้ทายตอนนี้');
@@ -319,7 +357,7 @@
     const items = collectPendingPredictions();
     if (items.length === 0) return;
     $('#confirmAllModal').classList.remove('show');
-    openPinModal(items.map(i => i.match.id));
+    openPinModal(items.map(i => ({ matchId: i.match.id, scoreA: i.scoreA, scoreB: i.scoreB, match: i.match })));
   };
 
   // ---------- ส่วนแอดมิน: สร้างแมตช์ ----------
@@ -712,14 +750,41 @@
     el.value = next;
   };
 
-  async function actuallySubmitPred(matchId) {
-    const scoreA = parseInt($(`#predA-${matchId}`).value, 10);
-    const scoreB = parseInt($(`#predB-${matchId}`).value, 10);
+  async function actuallySubmitPred(matchId, scoreA, scoreB) {
     const myPred = (predictions[matchId] || []).find(p => p.uid === currentUser.uid);
     const ref = myPred
       ? doc(db, 'matches', matchId, 'predictions', myPred.id)
       : doc(collection(db, 'matches', matchId, 'predictions'));
     await setDoc(ref, { uid: currentUser.uid, name: myName, scoreA, scoreB, updatedAt: serverTimestamp() });
+  }
+
+  function showSubmitSummary(submitted) {
+    const m = submitted[0]?.match;
+    if (!m) return;
+    const rows = submitted.map(({ match, scoreA, scoreB }) => `
+      <div class="summary-row">
+        <div class="summary-teams">
+          ${flagImg(match.teamA, 'sm')} <span>${teamName(match.teamA)}</span>
+          <span class="summary-score">${scoreA} — ${scoreB}</span>
+          <span>${teamName(match.teamB)}</span> ${flagImg(match.teamB, 'sm')}
+        </div>
+        <div class="summary-check">✅ บันทึกแล้ว</div>
+      </div>
+    `).join('');
+    const panel = document.createElement('div');
+    panel.id = 'submitSummaryPanel';
+    panel.className = 'modal-overlay show';
+    panel.innerHTML = `
+      <div class="modal-box">
+        <h3 style="margin:0 0 4px;font-size:16px;color:var(--green-ok)">✅ ส่งผลทายเรียบร้อย</h3>
+        <p class="modal-hint">ระบบบันทึกผลทายของ <strong>${myName}</strong> ไว้แล้ว</p>
+        <div class="submit-summary-list">${rows}</div>
+        <div class="modal-actions">
+          <button class="btn-primary" onclick="this.closest('#submitSummaryPanel').remove()">ปิด</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
   }
 
   window.__toggleLock = async (matchId, status) => {
@@ -999,6 +1064,13 @@
   .confirm-row .confirm-team:last-child { justify-content: flex-end; text-align: right; }
   .confirm-score { font-weight: 800; color: var(--gold); white-space: nowrap; padding: 0 6px; }
 
+  /* ----- สรุปหลังส่งผลทาย ----- */
+  .submit-summary-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; max-height: 50vh; overflow-y: auto; }
+  .summary-row { background: rgba(0,0,0,.2); border-radius: 8px; padding: 10px 12px; }
+  .summary-teams { display: flex; align-items: center; gap: 6px; font-size: 13px; flex-wrap: wrap; justify-content: center; }
+  .summary-score { font-weight: 800; color: var(--gold); font-size: 18px; padding: 0 8px; }
+  .summary-check { text-align: center; font-size: 12px; color: var(--green-ok); margin-top: 4px; }
+
   /* ----- แถบยืนยันลอยด้านล่าง ----- */
   .sticky-confirm-bar {
     position: fixed; left: 50%; bottom: 0;
@@ -1261,7 +1333,7 @@
     <h1>⚽ World Cup 2026</h1>
     <div class="sub">ทายผล • เลือกทีม • ใส่ HDP • ลุ้นแชมป์กับเพื่อน</div>
     <div id="status">กำลังเชื่อมต่อ...</div>
-    <button id="myNameTag" class="my-name-tag" onclick="window.__openNameModal()">👤 ตั้งชื่อ</button>
+    <button id="myNameTag" class="my-name-tag" onclick="window.__openLoginModal()">👤 ตั้งชื่อ</button>
   </div>
 
   <div class="flag-ticker-outer">
@@ -1270,19 +1342,48 @@
     </div>
   </div>
 
-  <div id="nameModal" class="modal-overlay">
+  <div id="loginModal" class="modal-overlay">
     <div class="modal-box">
-      <h3 id="nameModalTitle">ตั้งชื่อของคุณ</h3>
-      <p class="modal-hint">ใช้ชื่อ+รหัสนี้ทายทุกแมตช์ ไม่ต้องพิมพ์ใหม่ทุกครั้ง และกันคนอื่นสวมชื่อคุณ — จำรหัสไว้ให้ดี ใช้ยืนยันตัวตนทุกครั้งที่ส่งทาย</p>
-      <label class="field-label">ชื่อ</label>
-      <input type="text" id="nameModalInput" placeholder="เช่น เอก, นัท, มายด์" maxlength="24">
-      <label class="field-label" style="margin-top:8px">รหัส 4 หลัก</label>
-      <input type="tel" id="nameModalPin" placeholder="เช่น 1234" maxlength="4" inputmode="numeric" pattern="\d*">
-      <div class="modal-error" id="nameModalError"></div>
-      <div class="modal-actions">
-        <button id="nameModalCancel" class="btn-tiny" onclick="window.__closeNameModal()">ยกเลิก</button>
-        <button class="btn-primary" onclick="window.__saveName()">บันทึก</button>
+
+      <!-- Step 1: กรอก PIN -->
+      <div id="loginStep1">
+        <h3>⚽ เข้าสู่ระบบ</h3>
+        <p class="modal-hint">กรอก Password 4 หลักของคุณ — ถ้ายังไม่มีระบบจะให้ตั้งชื่อเพื่อสร้างบัญชีใหม่</p>
+        <label class="field-label">Password 4 หลัก</label>
+        <input type="tel" id="loginPinInput" placeholder="เช่น 1234" maxlength="4" inputmode="numeric" pattern="\d*" style="font-size:22px;letter-spacing:6px;text-align:center">
+        <div class="modal-error" id="loginPinError"></div>
+        <div class="modal-actions" style="margin-top:14px">
+          <button class="btn-primary" style="width:100%" onclick="window.__checkLoginPin()">ตรวจสอบ →</button>
+        </div>
       </div>
+
+      <!-- Step 2a: PIN ถูกจองแล้ว (returning user) -->
+      <div id="loginStep2Return" style="display:none">
+        <h3>👋 ยินดีต้อนรับกลับ!</h3>
+        <p class="modal-hint">Password นี้ผูกกับชื่อด้านล่างแล้ว — กด "เข้าสู่ระบบ" เพื่อใช้งานต่อ</p>
+        <div style="background:rgba(255,106,0,.12);border:1px solid rgba(255,106,0,.3);border-radius:10px;padding:14px;text-align:center;margin:10px 0">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">ชื่อที่ผูกไว้</div>
+          <div id="loginReturnName" style="font-size:20px;font-weight:800;color:var(--gold)"></div>
+        </div>
+        <div class="modal-actions" style="margin-top:14px;gap:8px">
+          <button class="btn-tiny" onclick="window.__loginBack()">← กลับ</button>
+          <button class="btn-primary" style="flex:1" onclick="window.__loginReturn()">✅ เข้าสู่ระบบ</button>
+        </div>
+      </div>
+
+      <!-- Step 2b: PIN ว่าง (new user) -->
+      <div id="loginStep2New" style="display:none">
+        <h3>🆕 สร้างบัญชีใหม่</h3>
+        <p class="modal-hint">Password นี้ยังว่างอยู่ — ตั้งชื่อของคุณเพื่อจองรหัสนี้</p>
+        <label class="field-label">ชื่อของคุณ</label>
+        <input type="text" id="loginNewName" placeholder="เช่น เอก, นัท, มายด์" maxlength="24">
+        <div class="modal-error" id="loginNewError"></div>
+        <div class="modal-actions" style="margin-top:14px;gap:8px">
+          <button class="btn-tiny" onclick="window.__loginBack()">← กลับ</button>
+          <button class="btn-primary" style="flex:1" onclick="window.__loginCreate()">✅ สร้างบัญชี</button>
+        </div>
+      </div>
+
     </div>
   </div>
 
