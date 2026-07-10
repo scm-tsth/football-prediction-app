@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ทายผลบอลกับเพื่อน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import {
@@ -872,23 +875,25 @@
     const [first, second, third] = top3;
     const block = (entry, place) => {
       const medal = place === 1 ? '🥇' : place === 2 ? '🥈' : '🥉';
-      if (!entry) return `<div class="podium-col podium-${place}"><div class="podium-name">-</div><div class="podium-block"><span class="podium-num">${place}</span></div></div>`;
-      const [name] = entry;
-      const isMe = name === myName;
+      const medalBig = place === 1 ? '🥇' : place === 2 ? '🥈' : '🥉';
+      const name = entry ? entry[0] : '-';
+      const isMe = entry && name === myName;
+      const rcClass = `rc-${place}`;
+      const pnameClass = place === 1 ? 'pname pname-1' : 'pname pname-23';
+      const pblockClass = `pblock b${place}`;
+      const pnumClass = `pnum pnum-${place}`;
+      const pmedal = place === 1 ? `<div class="pmedal pmedal-1">${medal}</div>` : `<div class="pmedal">${medal}</div>`;
       return `
-        <div class="podium-col podium-${place}">
-          <div class="podium-medal-icon">${medal}</div>
-          <div class="podium-name${isMe ? ' podium-name-me' : ''}">${name}</div>
-          <div class="podium-block"><span class="podium-num">${place}</span></div>
+        <div class="pcol podium-col podium-${place}">
+          <div class="rank-circle ${rcClass}">${place}</div>
+          ${pmedal}
+          <div class="${pnameClass}${isMe ? ' podium-name-me' : ''}">${name}</div>
+          <div class="${pblockClass}"><span class="${pnumClass}">${place}</span></div>
         </div>`;
     };
     wrap.innerHTML = `
       <div class="podium-stage">
-        <div class="podium-lights">
-          <div class="plight plight-1"></div>
-          <div class="plight plight-2"></div>
-          <div class="plight plight-3"></div>
-        </div>
+        <div class="board-label">— PODIUM —</div>
         <div class="podium">
           ${block(second, 2)}
           ${block(first, 1)}
@@ -1015,115 +1020,38 @@
   .rules-list li { margin-bottom: 6px; }
   .rules-list strong { color: var(--gold); }
 
-  /* ----- แท่นรับรางวัล (podium) ----- */
+  /* ----- แท่นรับรางวัล (podium) — digit style ----- */
   .podium-stage {
-    position: relative;
-    background: linear-gradient(180deg, #0d1117 0%, #1a1a22 60%, #222230 100%);
-    border-radius: 16px;
-    padding: 0 8px;
-    margin: 8px 0 18px;
-    overflow: hidden;
+    background: #07080d;
+    border-radius: 14px; padding: 16px 12px 0; margin: 8px 0 18px; overflow: hidden;
   }
-  .podium-lights {
-    display: flex; justify-content: center; gap: 52px;
-    padding-top: 12px; margin-bottom: -8px; position: relative; z-index: 2;
-  }
-  .plight {
-    width: 10px; height: 10px; border-radius: 50%;
-    background: #fffbe6;
-    box-shadow: 0 0 6px 3px rgba(255,251,200,.7);
-    position: relative;
-  }
-  .plight::after {
-    content: '';
-    position: absolute;
-    top: 8px; left: 50%;
-    transform: translateX(-50%);
-    border-left: 38px solid transparent;
-    border-right: 38px solid transparent;
-    border-top: 0px solid transparent;
-    width: 0; height: 0;
-  }
-  .plight-1::after { border-bottom: 160px solid rgba(255,251,180,.07); border-top: none; top: 8px; }
-  .plight-2::after { border-bottom: 200px solid rgba(255,251,180,.09); border-top: none; top: 8px; }
-  .plight-3::after { border-bottom: 160px solid rgba(255,251,180,.07); border-top: none; top: 8px; }
-  .podium {
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    gap: 6px;
-    position: relative; z-index: 3;
-    padding: 0 6px;
-  }
-  .podium-col {
-    display: flex; flex-direction: column; align-items: center;
-    width: 104px; position: relative;
-  }
-  .podium-spotlight {
-    position: absolute; top: -60px; left: 50%; transform: translateX(-50%);
-    width: 60px; height: 80px;
-    background: radial-gradient(ellipse at 50% 0%, rgba(255,251,180,.18) 0%, transparent 70%);
-    pointer-events: none;
-  }
-  .podium-avatar {
-    width: 46px; height: 46px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 15px; font-weight: 800; color: #fff;
-    margin-bottom: 4px; border: 2px solid rgba(255,255,255,.2);
-  }
-  .podium-avatar-1 { background: linear-gradient(135deg, #d4a017, #f5d060); color: #3a2a00; box-shadow: 0 0 14px rgba(255,210,60,.5); border-color: #ffe07a; }
-  .podium-avatar-2 { background: linear-gradient(135deg, #8a9aaa, #c8d4dc); color: #1a2530; box-shadow: 0 0 8px rgba(200,212,220,.3); border-color: #c8d4dc; }
-  .podium-avatar-3 { background: linear-gradient(135deg, #a0622a, #d4976a); color: #2a1500; box-shadow: 0 0 8px rgba(200,150,90,.3); border-color: #d4976a; }
-  .podium-avatar-empty { background: rgba(255,255,255,.08); color: var(--muted); border: 1.5px dashed rgba(255,255,255,.2); }
-  .podium-medal-icon { font-size: 20px; margin-bottom: 2px; }
-  .podium-name {
-    font-size: 12px; font-weight: 700; color: #f0f0f0;
-    max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    text-align: center; margin-bottom: 6px; text-shadow: 0 1px 6px rgba(0,0,0,.8);
-  }
-  .podium-name-me { color: var(--gold); }
-  .podium-block {
-    width: 100%; border-radius: 6px 6px 0 0;
-    display: flex; flex-direction: column; align-items: center;
-    justify-content: flex-end; padding-bottom: 8px; gap: 4px;
-    position: relative; overflow: hidden;
-  }
-  .podium-block::before {
-    content: '';
-    position: absolute; inset: 0;
-    background: rgba(255,255,255,.04);
-    border-radius: 6px 6px 0 0;
-  }
-  .podium-1 .podium-block {
-    height: 110px;
-    background: linear-gradient(180deg, #f0e0a0 0%, #c8a020 30%, #8a6a08 100%);
-    box-shadow: 0 -4px 20px rgba(255,210,60,.35), inset 0 1px 0 rgba(255,255,255,.4);
-    border-top: 3px solid #ffe07a;
-  }
-  .podium-2 .podium-block {
-    height: 78px;
-    background: linear-gradient(180deg, #e8e8e8 0%, #b0b8c0 30%, #707880 100%);
-    box-shadow: 0 -4px 12px rgba(180,192,200,.2), inset 0 1px 0 rgba(255,255,255,.5);
-    border-top: 3px solid #d0dce4;
-  }
-  .podium-3 .podium-block {
-    height: 58px;
-    background: linear-gradient(180deg, #e0b080 0%, #a07040 30%, #604820 100%);
-    box-shadow: 0 -4px 12px rgba(180,130,80,.2), inset 0 1px 0 rgba(255,255,255,.3);
-    border-top: 3px solid #d4976a;
-  }
-  .podium-num {
-    font-size: 22px; font-weight: 900;
-    color: rgba(0,0,0,.35); position: relative; z-index: 1; line-height: 1;
-  }
-  .podium-block-pts {
-    font-size: 10px; font-weight: 700;
-    color: rgba(0,0,0,.5); position: relative; z-index: 1;
-  }
-  .podium-floor {
-    height: 10px;
-    background: linear-gradient(180deg, rgba(255,255,255,.06), transparent);
-  }
+  .board-label { text-align: center; font-size: 9px; letter-spacing: 4px; color: #333; margin-bottom: 14px; font-family: 'Orbitron', monospace; }
+  .podium { display: flex; align-items: flex-end; justify-content: center; gap: 4px; }
+  .pcol { display: flex; flex-direction: column; align-items: center; flex: 1; }
+  /* rank circle */
+  .rank-circle { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'Orbitron', monospace; font-weight: 900; margin-bottom: 6px; }
+  .rc-1 { width: 48px; height: 48px; font-size: 22px; background: #1a1200; border: 2px solid #ffaa00; color: #ffcc00; text-shadow: 0 0 12px rgba(255,200,0,.9); box-shadow: 0 0 14px rgba(255,170,0,.4), inset 0 0 10px rgba(255,150,0,.1); }
+  .rc-2 { font-size: 16px; background: #0a0f14; border: 2px solid #3a6080; color: #7ab0d0; box-shadow: 0 0 8px rgba(60,100,140,.3); }
+  .rc-3 { font-size: 16px; background: #110c07; border: 2px solid #7a4a1a; color: #c8845a; box-shadow: 0 0 8px rgba(120,70,20,.3); }
+  /* medal */
+  .pmedal { font-size: 18px; margin-bottom: 5px; }
+  .pmedal-1 { font-size: 26px; filter: drop-shadow(0 0 8px rgba(255,180,0,.9)); }
+  /* name */
+  .pname { font-weight: 700; letter-spacing: .5px; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 8px; font-family: 'Orbitron', monospace; }
+  .pname-1 { font-size: 15px; color: #ffcc00; text-shadow: 0 0 12px rgba(255,200,0,.8); }
+  .pname-23 { font-size: 12px; color: #aaa; }
+  .podium-name-me { color: var(--gold) !important; text-shadow: 0 0 10px var(--gold) !important; }
+  /* block */
+  .pblock { width: 100%; border-radius: 4px 4px 0 0; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+  .pnum { font-family: 'Orbitron', monospace; font-weight: 900; line-height: 1; position: relative; z-index: 1; }
+  .pnum-1 { font-size: 44px; color: #ffcc00; text-shadow: 0 0 20px rgba(255,200,0,.9), 0 0 40px rgba(255,150,0,.5); }
+  .pnum-2 { font-size: 32px; color: rgba(180,210,230,.5); }
+  .pnum-3 { font-size: 32px; color: rgba(180,130,90,.5); }
+  .b1 { height: 120px; background: linear-gradient(180deg,#1a1400,#0d0900); border-top: 2px solid #ffaa00; box-shadow: 0 -8px 30px rgba(255,170,0,.35), inset 0 1px 0 rgba(255,200,0,.2); }
+  .b2 { height: 82px; background: linear-gradient(180deg,#0e1318,#080b0f); border-top: 2px solid #3a6080; box-shadow: 0 -4px 14px rgba(60,100,140,.25); }
+  .b3 { height: 60px; background: linear-gradient(180deg,#130e09,#0a0704); border-top: 2px solid #7a4a1a; box-shadow: 0 -4px 14px rgba(120,70,20,.2); }
+  .b1::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(255,200,0,.03) 3px,rgba(255,200,0,.03) 4px); pointer-events: none; }
+  .podium-floor { height: 8px; background: linear-gradient(180deg,rgba(255,255,255,.04),transparent); }
   .podium-1 { order: 2; }
   .podium-2 { order: 1; }
   .podium-3 { order: 3; }
@@ -1430,12 +1358,14 @@
     .name-row .btn-primary { width: 100%; }
     .flag-ticker-outer { padding: 0 8px; }
     .ticker-flag .flag { width: 26px; height: 19px; }
-    .podium-col { width: 88px; }
-    .podium-1 .podium-block { height: 90px; }
-    .podium-2 .podium-block { height: 64px; }
-    .podium-3 .podium-block { height: 48px; }
-    .podium-name { font-size: 11px; max-width: 86px; }
-    .podium-avatar { width: 38px; height: 38px; font-size: 13px; }
+    .b1 { height: 90px; }
+    .b2 { height: 65px; }
+    .b3 { height: 48px; }
+    .pname-1 { font-size: 13px; }
+    .pname-23 { font-size: 11px; }
+    .pnum-1 { font-size: 34px; }
+    .rc-1 { width: 40px; height: 40px; font-size: 18px; }
+    .rank-circle { width: 30px; height: 30px; font-size: 13px; }
     .modal-box { padding: 16px; max-height: 85vh; overflow-y: auto; }
     .modal-box-wide { max-height: 85vh; }
     .confirm-row { font-size: 12px; padding: 7px 8px; gap: 4px; }
