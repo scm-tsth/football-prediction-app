@@ -303,18 +303,14 @@
     const pin = $('#pinModalInput').value.trim();
     const errEl = $('#pinModalError');
     if (!/^\d{4}$/.test(pin)) { errEl.textContent = 'กรอกรหัส 4 หลัก'; return; }
-
-    const snap = await getDoc(doc(db, 'players', pin));
-    if (!snap.exists() || snap.data().name !== myName) {
+    if (pin !== myPin) {
       errEl.textContent = 'รหัสไม่ถูกต้อง ไม่สามารถยืนยันตัวตนได้';
       return;
     }
 
     $('#pinModal').classList.remove('show');
     const submitted = [...pendingPreds];
-    for (const pred of submitted) {
-      await actuallySubmitPred(pred.matchId, pred.scoreA, pred.scoreB);
-    }
+    await Promise.all(submitted.map(pred => actuallySubmitPred(pred.matchId, pred.scoreA, pred.scoreB)));
     pendingPreds = [];
     $('#confirmAllModal').classList.remove('show');
     showSubmitSummary(submitted);
@@ -412,7 +408,16 @@
     onSnapshot(q, (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-      predictions[matchId] = list;
+      // dedupe ด้วย name — เอาอันที่ updatedAt ล่าสุดไว้
+      const seen = new Map();
+      for (const p of list) {
+        const key = p.name;
+        const existing = seen.get(key);
+        const pTime = p.updatedAt?.seconds ?? 0;
+        const eTime = existing?.updatedAt?.seconds ?? 0;
+        if (!existing || pTime >= eTime) seen.set(key, p);
+      }
+      predictions[matchId] = [...seen.values()];
       renderMatches();
       renderLeaderboard();
     });
