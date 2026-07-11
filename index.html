@@ -448,19 +448,13 @@
     if (match.resultA === null || match.resultB === null) return null;
     const hdpNum = parseFloat(match.hdp) || 0;
 
-    let actualDiff, predDiff;
-    if (match.hdpSide === 'A') {
-      actualDiff = match.resultA - match.resultB;
-      predDiff = pred.scoreA - pred.scoreB;
-    } else {
-      actualDiff = match.resultB - match.resultA;
-      predDiff = pred.scoreB - pred.scoreA;
-    }
+    const predDiff = match.hdpSide === 'A'
+      ? pred.scoreA - pred.scoreB
+      : pred.scoreB - pred.scoreA;
 
-    const sActual = settlement(actualDiff, hdpNum);
-    const sPredicted = settlement(predDiff, hdpNum);
-    // ส่วนที่ 1 — ทาย HDP: +1 / +0.5 / 0 / -0.5 / -1 ตามความใกล้เคียงระดับชนะ-แพ้ค่าต่อ
-    const hdpComponent = 1 - Math.abs(sActual - sPredicted);
+    // ส่วนที่ 1 — HDP: settlement ของผลทาย (predDiff) กับค่าต่อ
+    // +1=ชนะเต็ม, +0.5=ชนะครึ่ง, 0=push, -0.5=เสียครึ่ง, -1=เสียเต็ม
+    const hdpComponent = settlement(predDiff, hdpNum);
     // ส่วนที่ 2 — ทายสกอร์: ตรงเป๊ะ +3, ไม่ตรง -1
     const isExact = pred.scoreA === match.resultA && pred.scoreB === match.resultB;
     const scoreComponent = isExact ? 3 : -1;
