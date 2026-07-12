@@ -455,10 +455,11 @@
       ? pred.scoreA - pred.scoreB
       : pred.scoreB - pred.scoreA;
 
-    // ส่วนที่ 1 — HDP: ทายถูกทิศ → ได้ |sPredicted| | ทายผิดทิศ → 0
+    // ส่วนที่ 1 — HDP: ทายถูกทิศ → +|sPredicted| | ทายผิดทิศ → -|sActual|
     const sActual = settlement(actualDiff, hdpNum);
     const sPredicted = settlement(predDiff, hdpNum);
-    const hdpComponent = sActual * sPredicted > 0 ? Math.abs(sPredicted) : 0;
+    const sameDir = sActual * sPredicted > 0;
+    const hdpComponent = sameDir ? Math.abs(sPredicted) : -Math.abs(sActual);
     // ส่วนที่ 2 — ทายสกอร์: ตรงเป๊ะ +3, ไม่ตรง -1
     const isExact = pred.scoreA === match.resultA && pred.scoreB === match.resultB;
     const scoreComponent = isExact ? 3 : -1;
