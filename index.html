@@ -313,7 +313,7 @@
 
     $('#pinModal').classList.remove('show');
     const submitted = [...pendingPreds];
-    await Promise.all(submitted.map(pred => actuallySubmitPred(pred.matchId, pred.scoreA, pred.scoreB)));
+    await Promise.all(submitted.map(pred => actuallySubmitPred(pred.matchId, pred.scoreA, pred.scoreB, pred.side)));
     pendingPreds = [];
     $('#confirmAllModal').classList.remove('show');
     showSubmitSummary(submitted);
@@ -321,13 +321,19 @@
 
   // ---------- รวบรวมการทายทั้งหมด -> หน้าต่างสรุป -> ยืนยันด้วยรหัส 4 หลัก ----------
   function collectPendingPredictions() {
-    return matches
-      .filter(m => m.status === 'open')
-      .map(m => {
-        const scoreA = parseInt(document.getElementById(`predA-${m.id}`)?.value, 10) || 0;
-        const scoreB = parseInt(document.getElementById(`predB-${m.id}`)?.value, 10) || 0;
-        return { match: m, scoreA, scoreB };
-      });
+    const items = [];
+    for (const m of matches.filter(m => m.status === 'open')) {
+      const scoreA = parseInt(document.getElementById(`predA-${m.id}`)?.value, 10) || 0;
+      const scoreB = parseInt(document.getElementById(`predB-${m.id}`)?.value, 10) || 0;
+      const side = document.querySelector(`[data-side-match="${m.id}"].side-selected`)?.dataset.side || null;
+      if (!side) {
+        const nameA = teamName(m.teamA), nameB = teamName(m.teamB);
+        alert(`⚠️ กรุณาเลือกทีมที่ชนะก่อน\n(${nameA} vs ${nameB})`);
+        return [];
+      }
+      items.push({ match: m, scoreA, scoreB, side });
+    }
+    return items;
   }
 
   window.__openConfirmAll = () => {
@@ -338,13 +344,18 @@
       return;
     }
     const list = $('#confirmAllList');
-    list.innerHTML = items.map(({ match: m, scoreA, scoreB }) => `
-      <div class="confirm-row">
-        <span class="confirm-team">${flagImg(m.teamA)} ${teamName(m.teamA)}</span>
-        <span class="confirm-score">${scoreA} - ${scoreB}</span>
-        <span class="confirm-team">${teamName(m.teamB)} ${flagImg(m.teamB)}</span>
-      </div>
-    `).join('');
+    list.innerHTML = items.map(({ match: m, scoreA, scoreB, side }) => {
+      const sideFlag = side === 'A' ? flagImg(m.teamA, 'sm') : flagImg(m.teamB, 'sm');
+      const sideName = side === 'A' ? teamName(m.teamA) : teamName(m.teamB);
+      return `<div class="confirm-row">
+        <div class="confirm-side-tag">${sideFlag} <strong>${sideName}</strong> ชนะ</div>
+        <div class="confirm-score-row">
+          <span class="confirm-team">${flagImg(m.teamA)} ${teamName(m.teamA)}</span>
+          <span class="confirm-score">${scoreA} - ${scoreB}</span>
+          <span class="confirm-team">${teamName(m.teamB)} ${flagImg(m.teamB)}</span>
+        </div>
+      </div>`;
+    }).join('');
     $('#confirmAllModal').classList.add('show');
   };
 
@@ -356,7 +367,7 @@
     const items = collectPendingPredictions();
     if (items.length === 0) return;
     $('#confirmAllModal').classList.remove('show');
-    openPinModal(items.map(i => ({ matchId: i.match.id, scoreA: i.scoreA, scoreB: i.scoreB, match: i.match })));
+    openPinModal(items.map(i => ({ matchId: i.match.id, scoreA: i.scoreA, scoreB: i.scoreB, side: i.side, match: i.match })));
   };
 
   // ---------- ส่วนแอดมิน: สร้างแมตช์ ----------
@@ -455,11 +466,17 @@
       ? pred.scoreA - pred.scoreB
       : pred.scoreB - pred.scoreA;
 
-    // ส่วนที่ 1 — HDP: ถูกทิศ → +|sActual| | ผิดทิศ → -|sActual|
     const sActual = settlement(actualDiff, hdpNum);
-    const sPredicted = settlement(predDiff, hdpNum);
-    const sameDir = sActual * sPredicted > 0;
-    const hdpComponent = sameDir ? Math.abs(sActual) : -Math.abs(sActual);
+    // ทิศ: ถ้ามี pred.side ให้ใช้เลย (ใหม่), ถ้าไม่มีให้ infer จาก predDiff (backward compat)
+    let predSign;
+    if (pred.side) {
+      predSign = pred.side === match.hdpSide ? 1 : -1;
+    } else {
+      const sPredicted = settlement(predDiff, hdpNum);
+      predSign = sPredicted > 0 ? 1 : sPredicted < 0 ? -1 : 0;
+    }
+    // ส่วนที่ 1 — HDP: ถูกทิศ → +|sActual| | ผิดทิศ → -|sActual|
+    const hdpComponent = predSign * sActual;
     // ส่วนที่ 2 — ทายสกอร์: ตรงเป๊ะ +3, ไม่ตรง -1
     const isExact = pred.scoreA === match.resultA && pred.scoreB === match.resultB;
     const scoreComponent = isExact ? 3 : -1;
@@ -569,6 +586,21 @@
         ` : ''}
 
         <div class="predict-box">
+          ${isOpen ? `
+            <div class="side-label">เลือกทีมที่ชนะ / ครอบ HDP:</div>
+            <div class="side-btns">
+              <button type="button" class="side-pick-btn ${myPred?.side === 'A' ? 'side-selected' : ''}"
+                data-side-match="${m.id}" data-side="A"
+                onclick="window.__pickSide('${m.id}','A')">
+                ${flagImg(m.teamA, 'sm')} ${nameA}
+              </button>
+              <button type="button" class="side-pick-btn ${myPred?.side === 'B' ? 'side-selected' : ''}"
+                data-side-match="${m.id}" data-side="B"
+                onclick="window.__pickSide('${m.id}','B')">
+                ${flagImg(m.teamB, 'sm')} ${nameB}
+              </button>
+            </div>
+          ` : ''}
           <div class="stepper-row">
             <div class="stepper">
               <button type="button" class="step-btn" onclick="window.__step('predA-${m.id}', -1)" ${!isOpen ? 'disabled' : ''}>−</button>
@@ -585,12 +617,13 @@
           ${myPred && isOpen ? `
             <div class="my-saved-pred">
               <div class="my-saved-label">📌 ผลที่ทายล่าสุด</div>
+              ${myPred.side ? `<div class="my-saved-side">เลือก: ${myPred.side === 'A' ? flagImg(m.teamA, 'sm') + ' ' + nameA : flagImg(m.teamB, 'sm') + ' ' + nameB} ชนะ</div>` : ''}
               <div class="my-saved-score">
                 ${flagImg(m.teamA, 'sm')} <span class="saved-num">${myPred.scoreA}</span>
                 <span class="saved-dash">—</span>
                 <span class="saved-num">${myPred.scoreB}</span> ${flagImg(m.teamB, 'sm')}
               </div>
-              <div class="my-saved-hint">แก้ตัวเลขด้านบนแล้วกดยืนยันเพื่ออัปเดต</div>
+              <div class="my-saved-hint">แก้ข้อมูลด้านบนแล้วกดยืนยันเพื่ออัปเดต</div>
             </div>
           ` : ''}
         </div>
@@ -767,12 +800,12 @@
     el.value = next;
   };
 
-  async function actuallySubmitPred(matchId, scoreA, scoreB) {
+  async function actuallySubmitPred(matchId, scoreA, scoreB, side) {
     const myPred = (predictions[matchId] || []).find(p => p.uid === currentUser.uid);
     const ref = myPred
       ? doc(db, 'matches', matchId, 'predictions', myPred.id)
       : doc(collection(db, 'matches', matchId, 'predictions'));
-    await setDoc(ref, { uid: currentUser.uid, name: myName, scoreA, scoreB, updatedAt: serverTimestamp() });
+    await setDoc(ref, { uid: currentUser.uid, name: myName, scoreA, scoreB, side: side || null, updatedAt: serverTimestamp() });
   }
 
   function showSubmitSummary(submitted) {
@@ -803,6 +836,11 @@
     `;
     document.body.appendChild(panel);
   }
+
+  window.__pickSide = (matchId, side) => {
+    document.querySelectorAll(`[data-side-match="${matchId}"]`).forEach(b => b.classList.remove('side-selected'));
+    document.querySelector(`[data-side-match="${matchId}"][data-side="${side}"]`)?.classList.add('side-selected');
+  };
 
   window.__toggleLock = async (matchId, status) => {
     if (!isAdmin()) { alert('เฉพาะแอดมินเท่านั้น'); return; }
@@ -1120,6 +1158,23 @@
   }
   .has-sticky-bar:last-child { margin-bottom: 70px; }
   .already-pred-tag { font-size: 12px; color: var(--green-ok); margin-top: 8px; }
+  /* ----- side picker ----- */
+  .side-label { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .side-btns { display: flex; gap: 8px; margin-bottom: 12px; }
+  .side-pick-btn {
+    flex: 1; padding: 9px 6px; border-radius: 10px;
+    border: 1.5px solid var(--border); background: var(--pitch);
+    color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    transition: border-color .15s, background .15s, color .15s;
+  }
+  .side-pick-btn:hover { border-color: var(--gold); }
+  .side-pick-btn.side-selected { border-color: var(--gold); background: rgba(255,106,0,.15); color: var(--gold); }
+  .my-saved-side { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  /* confirm side tag */
+  .confirm-side-tag { font-size: 12px; color: var(--gold); margin-bottom: 4px; }
+  .confirm-score-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
   .my-saved-pred {
     margin-top: 12px; padding: 10px 14px; border-radius: 10px;
     background: rgba(52,232,158,.08); border: 1px solid rgba(52,232,158,.25);
